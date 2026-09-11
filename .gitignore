@@ -1,0 +1,4 @@
+examples/out/
+examples/dist/
+__pycache__/
+*.pyc
