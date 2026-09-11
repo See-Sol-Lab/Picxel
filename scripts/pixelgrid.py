@@ -3,8 +3,10 @@
 
     pixelgrid.py check  <file.pxg>...              validate; exit 1 on errors
     pixelgrid.py render <file.pxg>... [-o DIR]     PNG at 1x and 4x (checks first)
-    pixelgrid.py import <image.png> --size N [--name NAME] [--kind tile|item|sprite]
-                                                   PNG -> .pxg (colors snapped to DB32)
+    pixelgrid.py palette <image.png> [--colors N] [-o ref.pal]
+                                                   the N most used colors of a reference, as a palette file
+    pixelgrid.py import <image.png> --size N [--kind K] [--palette db32|custom|ref.pal] [--background auto]
+                                                   PNG (any size) -> .pxg: background stripped, cropped, squared, colors snapped
     pixelgrid.py sheet  <DIR> [-o OUT] [--columns N]
                                                    every .pxg in DIR -> spritesheet PNG + JSON + index.html
 
@@ -34,6 +36,35 @@ DB32 = [
     "#696a6a", "#595652", "#76428a", "#ac3232", "#d95763", "#d77bba", "#8f974a", "#8a6f30",
 ]
 PALETTES = {"db32": DB32}
+
+
+def palette_colors(name: str, base: Path | None) -> list[str] | None:
+    """Colors for a `palette:` value: a built-in name, or a .pal file (one #rrggbb per line). None = custom."""
+    if name in PALETTES:
+        return PALETTES[name]
+    if name == "custom":
+        return None
+    path = Path(name)
+    if not path.exists() and not path.is_absolute() and base is not None:
+        path = base / path                          # sheets name their .pal relative to themselves
+    if path.suffix == ".pal" and path.exists():
+        return [line.strip().lower() for line in path.read_text(encoding="utf-8").splitlines() if line.strip().startswith("#")]
+    raise ValueError(f"unknown palette {name!r} (built-ins: {sorted(PALETTES)}, or a .pal file, or custom)")
+
+
+def extract_palette(image: Path, count: int) -> list[str]:
+    """Median-cut the opaque pixels of an image down to `count` colors, most frequent first."""
+    img = Image.open(image).convert("RGBA")
+    data = img.get_flattened_data() if hasattr(img, "get_flattened_data") else img.getdata()
+    opaque = [(r, g, b) for r, g, b, a in data if a >= 128]
+    if not opaque:
+        raise ValueError("image has no opaque pixels")
+    tiny = Image.new("RGB", (len(opaque), 1))
+    tiny.putdata(opaque)
+    q = tiny.quantize(colors=count, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
+    counts = Counter(q.get_flattened_data() if hasattr(q, "get_flattened_data") else q.getdata())
+    pal = q.getpalette()
+    return ["#%02x%02x%02x" % tuple(pal[i * 3:i * 3 + 3]) for i, _ in counts.most_common()]
 SEAM_WARN = 40.0      # mean RGB distance across a tile edge
 ORPHAN_WARN = 3       # pixels with no same-color neighbor (8-way) per sheet
 
@@ -105,8 +136,11 @@ def check(sheet: Sheet) -> tuple[list[str], list[str]]:
         errors.append(f"size must be one of {SIZES}, got {sheet.size}")
     if sheet.kind not in KINDS:
         errors.append(f"kind must be one of {KINDS}, got {sheet.kind!r}")
-    if sheet.palette not in PALETTES and sheet.palette != "custom":
-        errors.append(f"palette must be one of {sorted(PALETTES)} or custom, got {sheet.palette!r}")
+    try:
+        master = palette_colors(sheet.palette, sheet.path.parent if sheet.path else None)
+    except ValueError as exc:
+        errors.append(str(exc))
+        master = None
     if not sheet.colors:
         errors.append("no colors declared (A: #rrggbb ...)")
     if len(sheet.colors) > len(SYMBOLS):
@@ -114,7 +148,7 @@ def check(sheet: Sheet) -> tuple[list[str], list[str]]:
     for sym, value in sheet.colors.items():
         if not _hex_ok(value):
             errors.append(f"color {sym} is not #rrggbb: {value!r}")
-        elif sheet.palette in PALETTES and value not in PALETTES[sheet.palette]:
+        elif master is not None and value not in master:
             errors.append(f"color {sym} = {value} is not in the {sheet.palette} palette")
     if errors:
         return errors, warnings
@@ -204,8 +238,49 @@ def _nearest(rgb: tuple[int, int, int], palette: list[str]) -> str:
     return min(palette, key=lambda p: _dist(p, probe))
 
 
-def import_png(src: Path, size: int, name: str | None, kind: str, palette: str) -> Sheet:
+def _strip_background(img: Image.Image, mode: str) -> Image.Image:
+    """`none`: keep alpha as is. `auto`: the most common corner color becomes transparent (with a tolerance). `#rrggbb`: that color."""
+    if mode == "none":
+        return img
+    px = img.load()
+    w, h = img.size
+    if mode == "auto":
+        corners = Counter(px[x, y][:3] for x, y in ((0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)))
+        target = corners.most_common(1)[0][0]
+    else:
+        target = tuple(int(mode[i:i + 2], 16) for i in (1, 3, 5))
+    out = img.copy()
+    op = out.load()
+    for y in range(h):
+        for x in range(w):
+            r, g, b, a = px[x, y]
+            if a and ((r - target[0]) ** 2 + (g - target[1]) ** 2 + (b - target[2]) ** 2) ** 0.5 < 28:
+                op[x, y] = (0, 0, 0, 0)
+    return out
+
+
+def _square(img: Image.Image, size: int) -> Image.Image:
+    """Crop to the opaque bounding box, pad to a square, resample to an exact multiple of `size`."""
+    bbox = img.getbbox()
+    if bbox:
+        img = img.crop(bbox)
+    w, h = img.size
+    side = max(w, h)
+    canvas = Image.new("RGBA", (side, side))
+    canvas.paste(img, ((side - w) // 2, (side - h) // 2))
+    block = max(1, side // size)
+    target = size * block
+    return canvas.resize((target, target), Image.LANCZOS) if side != target else canvas
+
+
+def import_png(src: Path, size: int, name: str | None, kind: str, palette: str, background: str = "none", colors: int = 16) -> Sheet:
     img = Image.open(src).convert("RGBA")
+    img = _strip_background(img, background)
+    if kind != "tile":
+        margin = max(1, img.width // size)          # one cell of transparent padding all round
+        framed = Image.new("RGBA", (img.width + 2 * margin, img.height + 2 * margin))
+        framed.paste(img, (margin, margin))
+        img = _square(framed, size)
     w, h = img.size
     if w != h:
         raise ValueError(f"source must be square, got {w}x{h}")
@@ -224,14 +299,15 @@ def import_png(src: Path, size: int, name: str | None, kind: str, palette: str) 
                     votes[None if a < 128 else (r, g, b)] += 1
             row.append(votes.most_common(1)[0][0])
         cells.append(row)
-    # collapse to <= 16 colors: snap to palette, or quantize when custom
-    if palette in PALETTES:
-        mapped = {c: _nearest(c, PALETTES[palette]) for row in cells for c in row if c is not None}
+    # collapse to <= 16 colors: snap to the master palette, or quantize the cells themselves when custom
+    master = palette_colors(palette, src.parent)
+    if master is not None:
+        mapped = {c: _nearest(c, master) for row in cells for c in row if c is not None}
     else:
         opaque = [c for row in cells for c in row if c is not None]
         tiny = Image.new("RGB", (len(opaque), 1))
         tiny.putdata(opaque)
-        q = tiny.quantize(colors=len(SYMBOLS), method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE).convert("RGB")
+        q = tiny.quantize(colors=min(colors, len(SYMBOLS)), method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE).convert("RGB")
         mapped = {c: "#%02x%02x%02x" % q.getpixel((i, 0)) for i, c in enumerate(opaque)}
     ordered = list(dict.fromkeys(mapped[c] for row in cells for c in row if c is not None))
     if len(ordered) > len(SYMBOLS):
@@ -333,8 +409,13 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("check"); p.add_argument("files", nargs="+", type=Path)
     p = sub.add_parser("render"); p.add_argument("files", nargs="+", type=Path); p.add_argument("-o", "--out", type=Path, default=Path("out"))
+    p = sub.add_parser("palette"); p.add_argument("image", type=Path); p.add_argument("--colors", type=int, default=16)
+    p.add_argument("-o", "--out", type=Path, help="write a .pal file (one #rrggbb per line) instead of printing")
     p = sub.add_parser("import"); p.add_argument("image", type=Path); p.add_argument("--size", type=int, required=True, choices=SIZES)
-    p.add_argument("--name"); p.add_argument("--kind", default="sprite", choices=KINDS); p.add_argument("--palette", default="db32")
+    p.add_argument("--name"); p.add_argument("--kind", default="sprite", choices=KINDS)
+    p.add_argument("--palette", default="db32", help="db32 | custom | path/to/file.pal")
+    p.add_argument("--colors", type=int, default=16, help="with --palette custom: how many colors to keep (<=16)")
+    p.add_argument("--background", default="none", help="none | auto (most common corner color) | #rrggbb - made transparent")
     p.add_argument("-o", "--out", type=Path, help="output .pxg (default: <name>.pxg next to the image)")
     p = sub.add_parser("sheet"); p.add_argument("dir", type=Path); p.add_argument("-o", "--out", type=Path); p.add_argument("--columns", type=int, default=8)
     a = ap.parse_args(argv)
@@ -351,8 +432,16 @@ def main(argv: list[str] | None = None) -> int:
                 native, preview = render(s, a.out)
                 print(f"  -> {native}  {preview}")
         return 1 if failed else 0
+    if a.cmd == "palette":
+        found = extract_palette(a.image, a.colors)
+        if a.out:
+            a.out.write_text("\n".join(found) + "\n", encoding="utf-8")
+            print(f"{len(found)} colors -> {a.out}")
+        else:
+            print("\n".join(found))
+        return 0
     if a.cmd == "import":
-        s = import_png(a.image, a.size, a.name, a.kind, a.palette)
+        s = import_png(a.image, a.size, a.name, a.kind, a.palette, a.background, a.colors)
         out = a.out or a.image.with_name(f"{s.name}.pxg")
         out.write_text(s.dump(), encoding="utf-8")
         errors, warnings = check(s)
