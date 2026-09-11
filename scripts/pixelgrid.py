@@ -132,6 +132,12 @@ def check(sheet: Sheet) -> tuple[list[str], list[str]]:
         return errors, warnings
 
     used = {c for row in sheet.rows for c in row if c != TRANSPARENT}
+    by_hex: dict[str, list[str]] = {}
+    for sym, value in sheet.colors.items():
+        by_hex.setdefault(value, []).append(sym)
+    for value, syms in by_hex.items():
+        if len(syms) > 1:
+            warnings.append(f"symbols {''.join(syms)} all map to {value} — one material lost its contrast")
     unused = sorted(set(sheet.colors) - used)
     if unused:
         warnings.append(f"declared but unused colors: {''.join(unused)}")

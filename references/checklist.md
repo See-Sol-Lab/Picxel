@@ -25,6 +25,7 @@ Run this against the `@4x` preview after every pass. Fix what fails, re-render, 
 - [ ] Detail is scattered, not centered — a centered blob repeats as a polka-dot field.
 
 ## Characters only
+- [ ] Features that must read (ears, eyes, horns, hands) are drawn **last**, on top of hair/mane/tufts — the lion's ears vanished under mane tufts until they were moved after them.
 - [ ] Head is large relative to body at 16/32 (2:3 to 1:1 head-to-body); at 64 proportions can approach 1:3.
 - [ ] Eyes are 1–2 pixels and dark; a mouth is optional and often better omitted at 16/32.
 - [ ] Feet sit on the bottom row or one above it, so the character stands on the tile below it.

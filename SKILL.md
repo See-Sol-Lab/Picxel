@@ -41,6 +41,8 @@ Names are stable identifiers (`grass-01`, `hero-idle-front`, `potion-red`); the 
 5. **Outline and clean.** Trace the outer edge in the darkest color, one pixel thick; remove isolated pixels; fix jagged diagonals. Render, run `check`, look.
 6. **Critique** against `references/checklist.md` and fix. Two look-fix rounds minimum. Deliver only a sheet that passes `check` with no errors.
 
+**Use `scripts/px.py` to author.** Writing 64 rows by hand invites off-by-one errors; instead write a small build script (`examples/lion.build.py` is the model) that places shapes with `Grid.disc / tri / rect / put`, shades by rules, calls `outline()` last and `write()`s the `.pxg`. Every call is still your decision about specific pixels; the script just keeps the rows aligned and makes the next pass a one-line edit. Draw the features that must read (ears, eyes, hands) *after* hair, manes and tufts, or they get buried.
+
 Working at 64: draw the silhouette at 32 first, scale the idea up mentally, then fill 64 in four 32×32 quadrants (top-left, top-right, bottom-left, bottom-right) so each quadrant is a full row set you can reason about.
 
 Tiles: keep detail scattered and small; anything centered becomes a polka-dot field when repeated. The `check` seam warning compares the left/right and top/bottom edges — soften edge rows/columns until it is quiet.
