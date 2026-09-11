@@ -47,6 +47,25 @@ Working at 64: draw the silhouette at 32 first, scale the idea up mentally, then
 
 Tiles: keep detail scattered and small; anything centered becomes a polka-dot field when repeated. The `check` seam warning compares the left/right and top/bottom edges — soften edge rows/columns until it is quiet.
 
+## From a reference image (the main path for batches)
+
+Drawing from imagination misses what the reference shows (pose, tilt, proportion). When the user gives an image, do not start on a blank canvas:
+
+1. **Anchor.** Look at the image and write `<name>.anchor.json` (format: `references/anchor.md`): 3–6 things to keep, what to drop, regions with a detail budget (`coarse` / `medium` / `fine`), size, kind. This is free — you are the vision model.
+2. **Mosaic.** `mosaic ref.png --anchor ref.anchor.json` strips the background (corner flood fill) and blocks each region at its budget: hair and cloth go coarse, faces and held objects stay fine.
+3. **Concept** (optional). `concept ref.pre.png --anchor … --provider none` uses the mosaic as the concept. Providers `codex` / `claude` / `api` are reserved for a flat redraw with an image model and are not implemented yet; `--prompt-only` prints the prompt they must use.
+4. **Palette.** `palette ref.concept.png --colors 12 -o ref.pal` — colors come from the image, so hue never drifts.
+5. **Base sheet.** `import ref.concept.png --size 32 --kind sprite --palette ref.pal` — pose and silhouette land on the grid at zero cost.
+6. **Refine, ≤ 20 steps.** `smooth` first, then edit with `scripts/px.py`: `Grid.load()` the sheet, `erase()` what the downsample smeared, `replace()` a muddy color with its ramp neighbor, redraw the two or three `keep` features that got lost (eyes as dots, the held object's silhouette), `outline()`, `write()`. Render and look once in the middle and once at the end.
+7. **Verify.** Look at the `@4x.png` next to the anchor: is every `keep` item still recognisable? Answer yes/no per item in your report; a `no` on the first two items means redo, not deliver.
+
+## Batches
+
+Two modes; the user chooses:
+- **queue** — one asset at a time through steps 1–7, cheapest in tokens, no interaction until the sheet is built.
+- **parallel** — split the manifest across subagents, one asset each, same steps; fast, several times the tokens.
+Batch runs never edit interactively; assets that fail verification go to a redo list, which the user reopens one at a time in single mode. Steps 1–4 for the whole manifest first, then 5–7.
+
 ## Commands
 
 ```bash
@@ -54,13 +73,17 @@ python scripts/pixelgrid.py check  assets/grass-01.pxg
 python scripts/pixelgrid.py render assets/grass-01.pxg -o out        # out/grass-01.png + out/grass-01@4x.png
 python scripts/pixelgrid.py import ref.png --size 32 --kind sprite   # ref.png -> ref.pxg, colors snapped to DB32
 python scripts/pixelgrid.py sheet  assets -o assets/dist             # sheet.png + sheet.json + index.html + png/
+python scripts/pixelgrid.py mosaic ref.png --anchor ref.anchor.json  # -> ref.pre.png (background stripped, regions blocked)
+python scripts/pixelgrid.py concept ref.pre.png --anchor ref.anchor.json --provider none   # -> ref.concept.png
+python scripts/pixelgrid.py palette ref.concept.png --colors 12 -o ref.pal
+python scripts/pixelgrid.py smooth assets/hero.pxg --passes 2 --keep B  # merge specks; keep symbol B (eyes) untouched
 ```
 
 Read the `@4x.png` after every render — that is your eyes. Open `dist/index.html` for the user: it is self-contained (zoom, checkerboard, kind filter, download links), no server needed.
 
-## Batches
+## Batches without references
 
-When the user gives a list ("4 grass variants, 2 dirt, a fence in 3 pieces, 20 items"), create one `.pxg` per asset in one directory, draw them one at a time through the steps above, then `sheet` the directory once at the end. Report the assets that have warnings you chose to keep, in one line each. If the user marks some for redo, redraw only those and re-run `sheet`.
+A list like "4 grass variants, 2 dirt, a fence in 3 pieces, 20 items" goes through the from-scratch steps, one `.pxg` per asset in one directory, then `sheet` once at the end. Report kept warnings in one line each; redo only what the user marks.
 
 ## Importing
 

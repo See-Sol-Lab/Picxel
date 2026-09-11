@@ -9,6 +9,10 @@
                                                    PNG (any size) -> .pxg: background stripped, cropped, squared, colors snapped
     pixelgrid.py sheet  <DIR> [-o OUT] [--columns N]
                                                    every .pxg in DIR -> spritesheet PNG + JSON + index.html
+    pixelgrid.py mosaic <ref.png> --anchor anchor.json  apply the anchor's detail budget per region -> ref.pre.png
+    pixelgrid.py concept <ref.pre.png> --anchor anchor.json [--provider none|codex|claude|api]
+                                                   flat concept image (providers other than none are reserved)
+    pixelgrid.py smooth <file.pxg>... [--passes N] [--keep SYMS]   merge specks in place
 
 Only Pillow is required. Sizes are fixed at 16, 32, 64.
 """
@@ -239,7 +243,8 @@ def _nearest(rgb: tuple[int, int, int], palette: list[str]) -> str:
 
 
 def _strip_background(img: Image.Image, mode: str) -> Image.Image:
-    """`none`: keep alpha as is. `auto`: the most common corner color becomes transparent (with a tolerance). `#rrggbb`: that color."""
+    """`none`: keep alpha as is. `auto`: flood-fill from the corners — only background *connected to the edge* goes
+    transparent, so a face the same tone as the backdrop survives. `#rrggbb`: same, seeded with that color."""
     if mode == "none":
         return img
     px = img.load()
@@ -249,13 +254,25 @@ def _strip_background(img: Image.Image, mode: str) -> Image.Image:
         target = corners.most_common(1)[0][0]
     else:
         target = tuple(int(mode[i:i + 2], 16) for i in (1, 3, 5))
+    tol2 = 30 * 30
+    def is_bg(x: int, y: int) -> bool:
+        r, g, b, a = px[x, y]
+        return a > 0 and (r - target[0]) ** 2 + (g - target[1]) ** 2 + (b - target[2]) ** 2 <= tol2
+    seen = bytearray(w * h)
+    stack = [(x, y) for x in range(w) for y in (0, h - 1)] + [(x, y) for y in range(h) for x in (0, w - 1)]
     out = img.copy()
     op = out.load()
-    for y in range(h):
-        for x in range(w):
-            r, g, b, a = px[x, y]
-            if a and ((r - target[0]) ** 2 + (g - target[1]) ** 2 + (b - target[2]) ** 2) ** 0.5 < 28:
-                op[x, y] = (0, 0, 0, 0)
+    while stack:
+        x, y = stack.pop()
+        i = y * w + x
+        if seen[i] or not is_bg(x, y):
+            continue
+        seen[i] = 1
+        op[x, y] = (0, 0, 0, 0)
+        if x > 0: stack.append((x - 1, y))
+        if x < w - 1: stack.append((x + 1, y))
+        if y > 0: stack.append((x, y - 1))
+        if y < h - 1: stack.append((x, y + 1))
     return out
 
 
@@ -321,6 +338,106 @@ def import_png(src: Path, size: int, name: str | None, kind: str, palette: str, 
     rows = ["".join(TRANSPARENT if c is None else symbol_of[mapped[c]] for c in row) for row in cells]
     colors = {symbol_of[h]: h for h in ordered}
     return Sheet(name or src.stem, size, kind, palette, colors, rows)
+
+
+# ---------------------------------------------------------------- reference pipeline
+
+DETAIL_DIVISOR = {"fine": None, "medium": 32, "coarse": 16}   # block = image width / divisor
+
+
+def load_anchor(path: Path) -> dict:
+    """Validate anchor.json (see references/anchor.md) and return it."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    problems = []
+    if not isinstance(data.get("keep"), list) or not 1 <= len(data["keep"]) <= 8:
+        problems.append("keep must list 1-8 things")
+    if data.get("size") not in SIZES:
+        problems.append(f"size must be one of {SIZES}")
+    if data.get("kind") not in KINDS:
+        problems.append(f"kind must be one of {KINDS}")
+    for i, region in enumerate(data.get("regions", [])):
+        box = region.get("box")
+        if not (isinstance(box, list) and len(box) == 4 and all(0 <= v <= 1 for v in box) and box[0] < box[2] and box[1] < box[3]):
+            problems.append(f"regions[{i}].box must be [x0, y0, x1, y1] in 0..1 with x0<x1, y0<y1")
+        if region.get("detail") not in DETAIL_DIVISOR:
+            problems.append(f"regions[{i}].detail must be one of {sorted(DETAIL_DIVISOR)}")
+    if problems:
+        raise ValueError("anchor.json: " + "; ".join(problems))
+    return data
+
+
+def mosaic(image: Path, anchor: dict, out: Path, background: str = "auto") -> Path:
+    """Apply the anchor's detail budget: block-average each region at its divisor; `fine` regions stay untouched.
+    Regions apply in order, later ones override earlier ones where they overlap. The background is stripped first
+    (before any blurring moves its color), so everything downstream sees real transparency."""
+    img = _strip_background(Image.open(image).convert("RGBA"), background)
+    w, h = img.size
+    result = img.copy()
+    for region in anchor.get("regions", []):
+        divisor = DETAIL_DIVISOR[region["detail"]]
+        x0, y0, x1, y1 = (int(round(region["box"][0] * w)), int(round(region["box"][1] * h)),
+                          int(round(region["box"][2] * w)), int(round(region["box"][3] * h)))
+        if divisor is None:
+            result.paste(img.crop((x0, y0, x1, y1)), (x0, y0))      # restore full detail from the source
+            continue
+        block = max(2, w // divisor)
+        patch = img.crop((x0, y0, x1, y1))
+        small = patch.resize((max(1, patch.width // block), max(1, patch.height // block)), Image.BOX)
+        result.paste(small.resize(patch.size, Image.NEAREST), (x0, y0))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    result.save(out)
+    return out
+
+
+CONCEPT_STYLE = ("Pixel-art concept image of the subject. Flat colors, no gradients, no anti-aliasing, no texture. "
+                 "Subject centered, filling the frame, on a plain white background. Bold readable silhouette. "
+                 "Keep: {keep}. Do not draw: {drop}. Limit to about {colors} distinct colors.")
+
+
+def concept(pre: Path, anchor: dict, provider: str, out: Path) -> Path:
+    """Second pass: turn the pre-processed reference into a flat, centered concept image.
+
+    Providers:
+      none   - no image model; the mosaic image *is* the concept (default, costs nothing)
+      codex  - reserved: generate through the user's Codex CLI (implementation owned by Sol)
+      claude - reserved: the running Claude session redraws it as a flat illustration
+      api    - reserved: OpenAI / Gemini / Grok / Kimi image API with the user's own key
+    The prompt every provider must use is CONCEPT_STYLE filled from the anchor; see concept_prompt()."""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if provider == "none":
+        Image.open(pre).convert("RGBA").save(out)
+        return out
+    raise NotImplementedError(f"concept provider {provider!r} is reserved and not implemented yet; "
+                              f"run with --provider none, or hand this prompt to the provider yourself:\n{concept_prompt(anchor)}")
+
+
+def concept_prompt(anchor: dict) -> str:
+    return CONCEPT_STYLE.format(keep="; ".join(anchor["keep"]), drop="; ".join(anchor.get("drop", [])) or "nothing in particular",
+                                colors=min(16, 4 + 2 * len(anchor["keep"])))
+
+
+def smooth_sheet(sheet: Sheet, passes: int, keep: str) -> int:
+    """Deterministic speck cleanup on a sheet (same rule as check's isolated-pixel warning)."""
+    n = sheet.size
+    grid = [list(r) for r in sheet.rows]
+    changed = 0
+    for _ in range(passes):
+        snap = [row[:] for row in grid]
+        for y in range(n):
+            for x in range(n):
+                c = snap[y][x]
+                if c == TRANSPARENT or c in keep:
+                    continue
+                around = [snap[y + dy][x + dx] for dx in (-1, 0, 1) for dy in (-1, 0, 1)
+                          if (dx or dy) and 0 <= x + dx < n and 0 <= y + dy < n]
+                if c in around:
+                    continue
+                opaque = [m for m in around if m != TRANSPARENT]
+                if opaque:
+                    grid[y][x] = max(set(opaque), key=opaque.count)
+                    changed += 1
+    sheet.rows = ["".join(r) for r in grid]
+    return changed
 
 
 # ---------------------------------------------------------------- sheet
@@ -418,6 +535,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--background", default="none", help="none | auto (most common corner color) | #rrggbb - made transparent")
     p.add_argument("-o", "--out", type=Path, help="output .pxg (default: <name>.pxg next to the image)")
     p = sub.add_parser("sheet"); p.add_argument("dir", type=Path); p.add_argument("-o", "--out", type=Path); p.add_argument("--columns", type=int, default=8)
+    p = sub.add_parser("mosaic"); p.add_argument("image", type=Path); p.add_argument("--anchor", type=Path, required=True); p.add_argument("-o", "--out", type=Path)
+    p.add_argument("--background", default="auto", help="none | auto | #rrggbb - stripped before blocking")
+    p = sub.add_parser("concept"); p.add_argument("image", type=Path, help="the pre-processed (mosaic) reference"); p.add_argument("--anchor", type=Path, required=True)
+    p.add_argument("--provider", default="none", choices=("none", "codex", "claude", "api")); p.add_argument("-o", "--out", type=Path)
+    p.add_argument("--prompt-only", action="store_true", help="print the concept prompt for the chosen provider and exit")
+    p = sub.add_parser("smooth"); p.add_argument("files", nargs="+", type=Path); p.add_argument("--passes", type=int, default=2)
+    p.add_argument("--keep", default="", help="symbols never merged (eyes, highlights), e.g. BG")
     a = ap.parse_args(argv)
 
     if a.cmd in ("check", "render"):
@@ -450,6 +574,28 @@ def main(argv: list[str] | None = None) -> int:
         return 1 if errors else 0
     if a.cmd == "sheet":
         build_sheet(a.dir, a.out or a.dir / "dist", a.columns)
+        return 0
+    if a.cmd == "mosaic":
+        anchor = load_anchor(a.anchor)
+        out = mosaic(a.image, anchor, a.out or a.image.with_name(a.image.stem + ".pre.png"), a.background)
+        print(f"mosaic -> {out} ({len(anchor.get('regions', []))} regions)")
+        return 0
+    if a.cmd == "concept":
+        anchor = load_anchor(a.anchor)
+        if a.prompt_only:
+            print(concept_prompt(anchor))
+            return 0
+        out = concept(a.image, anchor, a.provider, a.out or a.image.with_name(a.image.stem.replace(".pre", "") + ".concept.png"))
+        print(f"concept ({a.provider}) -> {out}")
+        return 0
+    if a.cmd == "smooth":
+        for f in a.files:
+            sh = load(f)
+            n = smooth_sheet(sh, a.passes, a.keep)
+            f.write_text(sh.dump(), encoding="utf-8")
+            errors, warnings = check(sh)
+            report(sh, errors, warnings)
+            print(f"  merged {n} specks -> {f}")
         return 0
     return 2
 

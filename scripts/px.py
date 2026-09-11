@@ -56,6 +56,58 @@ class Grid:
             for x in range(n // 2):
                 self.g[y][n - 1 - x] = self.g[y][x]
 
+    # ---- refine tools: work on a sheet that already exists (an import, an earlier pass)
+    @classmethod
+    def load(cls, path):
+        """Read a .pxg; returns (grid, meta, colors) so a refine pass can edit and write it back."""
+        text = open(path, encoding="utf-8").read()
+        head, _, body = text.partition("\n---\n")
+        meta, colors = {}, {}
+        for line in head.splitlines():
+            k, _, v = line.partition(":")
+            k, v = k.strip(), v.strip()
+            if len(k) == 1 and k.isupper():
+                colors[k] = v
+            elif k:
+                meta[k] = v
+        rows = [r for r in body.splitlines() if r.strip()]
+        g = cls(int(meta["size"]))
+        g.g = [list(r) for r in rows]
+        return g, meta, colors
+
+    def erase(self, x0, y0, x1, y1):
+        """Eraser: the rectangle becomes transparent."""
+        self.rect(x0, y0, x1, y1, ".")
+
+    def replace(self, old, new, box=None):
+        """Recolor: every `old` symbol becomes `new`, optionally only inside box=(x0, y0, x1, y1)."""
+        x0, y0, x1, y1 = box or (0, 0, self.n - 1, self.n - 1)
+        for y in range(y0, y1 + 1):
+            for x in range(x0, x1 + 1):
+                if self.g[y][x] == old:
+                    self.g[y][x] = new
+
+    def smooth(self, passes=1, keep=()):
+        """Merge specks: a pixel with no same-color 8-neighbour takes its most common opaque neighbour. `keep` symbols are never changed."""
+        n = self.n
+        changed = 0
+        for _ in range(passes):
+            snap = [row[:] for row in self.g]
+            for y in range(n):
+                for x in range(n):
+                    c = snap[y][x]
+                    if c == "." or c in keep:
+                        continue
+                    around = [snap[y + dy][x + dx] for dx in (-1, 0, 1) for dy in (-1, 0, 1)
+                              if (dx or dy) and 0 <= x + dx < n and 0 <= y + dy < n]
+                    if c in around:
+                        continue
+                    opaque = [m for m in around if m != "."]
+                    if opaque:
+                        self.g[y][x] = max(set(opaque), key=opaque.count)
+                        changed += 1
+        return changed
+
     def rows(self):
         return ["".join(r) for r in self.g]
 
