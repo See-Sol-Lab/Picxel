@@ -1,11 +1,11 @@
 ---
-name: pixelgrid
+name: picxel
 description: Produce game-ready pixel-art assets (tiles, items, character sprites) by writing a text grid of palette symbols that a script renders and checks. Use when the user asks for pixel art, sprites, tiles, tilesets, game assets, 16x16 / 32x32 / 64x64 art, or to convert an image into pixel art. Never use an image-generation model for the pixels themselves.
 ---
 
-# pixelgrid
+# Picxel
 
-You are the pixel artist. You write a `.pxg` sheet — a header of palette symbols plus one line of characters per row — and `scripts/pixelgrid.py` renders it to PNG, checks it, and packs a directory of sheets into a spritesheet with a preview page. Every pixel is a character you chose.
+You are the pixel artist. You write a `.pxg` sheet — a header of palette symbols plus one line of characters per row — and `scripts/picxel.py` renders it to PNG, checks it, and packs a directory of sheets into a spritesheet with a preview page. Every pixel is a character you chose.
 
 ## Fixed rules (v0.1)
 
@@ -69,7 +69,7 @@ Batch runs never edit interactively; assets that fail verification go to a redo 
 The deterministic half is one command. Put each reference image next to its `<name>.anchor.json` in one directory (you write the anchors first — that is step 1 for the whole batch), then:
 
 ```bash
-python scripts/pixelgrid.py batch refs/ --sizes 32          # -> refs/base/: pre, concept, .pal, base .pxg + renders, batch-report.json
+python scripts/picxel.py batch refs/ --sizes 32          # -> refs/base/: pre, concept, .pal, base .pxg + renders, batch-report.json
 ```
 
 One bad job never sinks the batch — it lands in the report as `failed`. After `batch`, only steps 6–7 (refine + verify) remain per sheet; that is where queue vs parallel applies.
@@ -77,15 +77,15 @@ One bad job never sinks the batch — it lands in the report as `failed`. After 
 ## Commands
 
 ```bash
-python scripts/pixelgrid.py check  assets/grass-01.pxg
-python scripts/pixelgrid.py render assets/grass-01.pxg -o out        # out/grass-01.png + out/grass-01@4x.png
-python scripts/pixelgrid.py import ref.png --size 32 --kind sprite   # ref.png -> ref.pxg, colors snapped to DB32
-python scripts/pixelgrid.py sheet  assets -o assets/dist             # sheet.png + sheet.json + index.html + png/
-python scripts/pixelgrid.py mosaic ref.png --anchor ref.anchor.json  # -> ref.pre.png (background stripped, regions blocked)
-python scripts/pixelgrid.py concept ref.pre.png --anchor ref.anchor.json --provider none   # -> ref.concept.png
-python scripts/pixelgrid.py palette ref.concept.png --colors 12 -o ref.pal
-python scripts/pixelgrid.py smooth assets/hero.pxg --passes 2 --keep B  # merge specks; keep symbol B (eyes) untouched
-python scripts/pixelgrid.py batch refs/ --sizes 64,32                # whole directory of <name>.anchor.json + image -> base sheets
+python scripts/picxel.py check  assets/grass-01.pxg
+python scripts/picxel.py render assets/grass-01.pxg -o out        # out/grass-01.png + out/grass-01@4x.png
+python scripts/picxel.py import ref.png --size 32 --kind sprite   # ref.png -> ref.pxg, colors snapped to DB32
+python scripts/picxel.py sheet  assets -o assets/dist             # sheet.png + sheet.json + index.html + png/
+python scripts/picxel.py mosaic ref.png --anchor ref.anchor.json  # -> ref.pre.png (background stripped, regions blocked)
+python scripts/picxel.py concept ref.pre.png --anchor ref.anchor.json --provider none   # -> ref.concept.png
+python scripts/picxel.py palette ref.concept.png --colors 12 -o ref.pal
+python scripts/picxel.py smooth assets/hero.pxg --passes 2 --keep B  # merge specks; keep symbol B (eyes) untouched
+python scripts/picxel.py batch refs/ --sizes 64,32                # whole directory of <name>.anchor.json + image -> base sheets
 ```
 
 Read the `@4x.png` after every render — that is your eyes. Open `dist/index.html` for the user: it is self-contained (zoom, checkerboard, kind filter, download links), no server needed.

@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""pixelgrid — render, check, import and sheet `.pxg` pixel-art sheets.
+"""Picxel — render, check, import and sheet `.pxg` pixel-art sheets.
 
-    pixelgrid.py check  <file.pxg>...              validate; exit 1 on errors
-    pixelgrid.py render <file.pxg>... [-o DIR]     PNG at 1x and 4x (checks first)
-    pixelgrid.py palette <image.png> [--colors N] [-o ref.pal]
+    picxel.py check  <file.pxg>...              validate; exit 1 on errors
+    picxel.py render <file.pxg>... [-o DIR]     PNG at 1x and 4x (checks first)
+    picxel.py palette <image.png> [--colors N] [-o ref.pal]
                                                    the N most used colors of a reference, as a palette file
-    pixelgrid.py import <image.png> --size N [--kind K] [--palette db32|custom|ref.pal] [--background auto]
+    picxel.py import <image.png> --size N [--kind K] [--palette db32|custom|ref.pal] [--background auto]
                                                    PNG (any size) -> .pxg: background stripped, cropped, squared, colors snapped
-    pixelgrid.py sheet  <DIR> [-o OUT] [--columns N]
+    picxel.py sheet  <DIR> [-o OUT] [--columns N]
                                                    every .pxg in DIR -> spritesheet PNG + JSON + index.html
-    pixelgrid.py mosaic <ref.png> --anchor anchor.json  apply the anchor's detail budget per region -> ref.pre.png
-    pixelgrid.py concept <ref.pre.png> --anchor anchor.json [--provider none|codex|claude|api]
+    picxel.py mosaic <ref.png> --anchor anchor.json  apply the anchor's detail budget per region -> ref.pre.png
+    picxel.py concept <ref.pre.png> --anchor anchor.json [--provider none|codex|claude|api]
                                                    flat concept image (providers other than none are reserved)
-    pixelgrid.py smooth <file.pxg>... [--passes N] [--keep SYMS]   merge specks in place
-    pixelgrid.py batch  <DIR> [-o OUT] [--provider P] [--sizes 64,32]
+    picxel.py smooth <file.pxg>... [--passes N] [--keep SYMS]   merge specks in place
+    picxel.py batch  <DIR> [-o OUT] [--provider P] [--sizes 64,32]
                                                    every <name>.anchor.json + image in DIR -> base sheets + batch-report.json
 
 Only Pillow is required. Sizes are fixed at 16, 32, 64.
@@ -546,7 +546,7 @@ def build_sheet(src_dir: Path, out_dir: Path, columns: int) -> None:
     print(f"sheet: {len(sheets)} assets -> {out_dir / 'sheet.png'}, sheet.json, index.html, png/")
 
 
-HTML = """<!doctype html><meta charset="utf-8"><title>pixelgrid sheet</title>
+HTML = """<!doctype html><meta charset="utf-8"><title>Picxel sheet</title>
 <style>
 :root{--bg:#1b1b1f;--fg:#e8e8ec;--card:#26262c}
 body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,sans-serif}
@@ -561,7 +561,7 @@ figcaption span{opacity:.7;font-size:12px}
 .hidden{display:none}
 #atlas{padding:0 20px 30px}#atlas img{image-rendering:pixelated;max-width:100%;background:var(--chk)}
 </style>
-<header><b>pixelgrid</b><span>{{COUNT}} assets</span>
+<header><b>Picxel</b><span>{{COUNT}} assets</span>
 <label>zoom <input id="z" type="range" min="1" max="12" value="6"><span id="zv">6×</span></label>
 <label><input id="chk" type="checkbox" checked> checkerboard</label>
 <label>show <select id="kind"><option value="">all</option><option>tile</option><option>item</option><option>sprite</option></select></label>
@@ -580,7 +580,7 @@ z.oninput=chk.onchange=kind.onchange=apply;apply();
 # ---------------------------------------------------------------- cli
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="pixelgrid", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(prog="picxel", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("check"); p.add_argument("files", nargs="+", type=Path)
     p = sub.add_parser("render"); p.add_argument("files", nargs="+", type=Path); p.add_argument("-o", "--out", type=Path, default=Path("out"))

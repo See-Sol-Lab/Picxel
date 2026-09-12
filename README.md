@@ -1,4 +1,4 @@
-# pixelgrid
+# Picxel
 
 > 名字占位。
 
@@ -15,7 +15,7 @@
 ## 装成 skill
 
 ```bash
-git clone <this repo> ~/.claude/skills/pixelgrid     # Claude Code
+git clone <this repo> ~/.claude/skills/picxel     # Claude Code
 # Codex：放进它的 skills 目录，同一份 SKILL.md
 ```
 
@@ -24,10 +24,10 @@ git clone <this repo> ~/.claude/skills/pixelgrid     # Claude Code
 ## 用
 
 ```bash
-python scripts/pixelgrid.py check  examples/grass-01.pxg
-python scripts/pixelgrid.py render examples/grass-01.pxg -o out
-python scripts/pixelgrid.py import ref.png --size 32 --kind sprite
-python scripts/pixelgrid.py sheet  examples -o examples/dist      # 开 examples/dist/index.html
+python scripts/picxel.py check  examples/grass-01.pxg
+python scripts/picxel.py render examples/grass-01.pxg -o out
+python scripts/picxel.py import ref.png --size 32 --kind sprite
+python scripts/picxel.py sheet  examples -o examples/dist      # 开 examples/dist/index.html
 ```
 
 `examples/` 里三张是第一版试画：32×32 草地（四边可拼）、32×32 正面小人、16×16 红药水。
