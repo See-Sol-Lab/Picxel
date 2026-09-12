@@ -10,15 +10,15 @@
     picxel.py sheet  <DIR> [-o OUT] [--columns N]
                                                    every .pxg in DIR -> spritesheet PNG + JSON + index.html
     picxel.py mosaic <ref.png> --anchor anchor.json  apply the anchor's detail budget per region -> ref.pre.png
-    picxel.py concept <ref.pre.png> --anchor anchor.json [--provider none|codex|claude|api]
-                                                   flat concept image (providers other than none are reserved)
-    picxel.py derive <big.pxg> --sizes 32,16          refine once at 64, majority-vote downsample the rest
+    picxel.py concept <ref.pre.png> --anchor anchor.json [--provider codex --result concept.png]
+                                                   consume an assistant-produced concept, or use the mosaic with none
+    picxel.py derive <big.pxg> --sizes 64,32          refine once at 128, majority-vote downsample the rest
     picxel.py show   <file.pxg> [--box x0,y0,x1,y1]   ASCII window of just the area you are editing
     picxel.py smooth <file.pxg>... [--passes N] [--keep SYMS]   merge specks in place
     picxel.py batch  <DIR> [-o OUT] [--provider P] [--sizes 64,32]
                                                    every <name>.anchor.json + image in DIR -> base sheets + batch-report.json
 
-Only Pillow is required. Sizes are fixed at 16, 32, 64.
+Only Pillow is required. Sizes are fixed at 32, 64, 128.
 """
 from __future__ import annotations
 
@@ -28,12 +28,14 @@ import base64
 import io
 import json
 import sys
+import math
+from html import escape
 from collections import Counter
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageChops
 
-SIZES = (16, 32, 64)
+SIZES = (32, 64, 128)
 KINDS = ("tile", "item", "sprite")
 SYMBOLS = "ABCDEFGHIJKLMNOP"
 TRANSPARENT = "."
@@ -74,7 +76,10 @@ def extract_palette(image: Path, count: int, anchor: dict | None = None) -> list
     - near-duplicate picks (distance < PALETTE_MIN_DIST) are merged, so five almost-equal
       dark grays cannot hog the 16 slots;
     - the darkest and lightest opaque colors are always kept -- outline and highlight need them."""
+    if not 2 <= count <= 16:
+        raise ValueError("colors must be between 2 and 16")
     img = Image.open(image).convert("RGBA")
+    img.thumbnail((256, 256), Image.Resampling.NEAREST)
     w, h = img.size
     weight_map = None
     if anchor is not None and anchor.get("regions"):
@@ -106,17 +111,20 @@ def extract_palette(image: Path, count: int, anchor: dict | None = None) -> list
     def dist(a, b):
         return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2) ** 0.5
 
-    picked: list[tuple[int, int, int]] = []
+    # Reserve both ends before filling the budget; replacing the last slot twice
+    # used to evict the dark outline again when adding the highlight.
+    reserved = (anchor or {}).get("palette", [])
+    if len(reserved) > count:
+        raise ValueError("anchor palette exceeds requested color count")
+    picked = [tuple(int(c[i:i + 2], 16) for i in (1, 3, 5)) for c in reserved]
+    for end in (min(candidates, key=sum), max(candidates, key=sum)):
+        if len(picked) < count and all(dist(end, o) >= PALETTE_MIN_DIST for o in picked):
+            picked.append(end)
     for c in candidates:                                   # frequency order, near-duplicates merged
         if len(picked) >= count:
             break
         if all(dist(c, o) >= PALETTE_MIN_DIST for o in picked):
             picked.append(c)
-    for end in (min(candidates, key=sum), max(candidates, key=sum)):   # guarantee both ends
-        if all(dist(end, o) >= PALETTE_MIN_DIST for o in picked):
-            if len(picked) >= count:
-                picked.pop()                               # drop the least frequent pick for it
-            picked.append(end)
     return ["#%02x%02x%02x" % c for c in picked]
 SEAM_WARN = 40.0      # mean RGB distance across a tile edge
 ORPHAN_WARN = 3       # pixels with no same-color neighbor (8-way) per sheet
@@ -147,7 +155,7 @@ class Sheet:
                 meta[key.lower()] = value
         rows = [r.rstrip("\r") for r in body.splitlines() if r.strip() != ""]
         return cls(meta.get("name", path.stem if path else "untitled"), int(meta.get("size", "0") or 0),
-                   meta.get("kind", "sprite").lower(), meta.get("palette", "db32").lower(), colors, rows, path)
+                   meta.get("kind", "sprite").lower(), meta.get("palette", "db32"), colors, rows, path)
 
     def dump(self) -> str:
         head = [f"name: {self.name}", f"size: {self.size}", f"kind: {self.kind}", f"palette: {self.palette}"]
@@ -185,6 +193,8 @@ def check(sheet: Sheet) -> tuple[list[str], list[str]]:
     """Return (errors, warnings). Errors block rendering."""
     errors: list[str] = []
     warnings: list[str] = []
+    if not re.fullmatch(r"[\w.-]+", sheet.name) or sheet.name in (".", ".."):
+        errors.append("name must be a filename-safe identifier (letters, digits, underscore, dot, hyphen)")
     if sheet.size not in SIZES:
         errors.append(f"size must be one of {SIZES}, got {sheet.size}")
     if sheet.kind not in KINDS:
@@ -296,12 +306,29 @@ def _strip_background(img: Image.Image, mode: str) -> Image.Image:
     transparent, so a face the same tone as the backdrop survives. `#rrggbb`: same, seeded with that color."""
     if mode == "none":
         return img
+    if mode.startswith("key:"):
+        color = mode[4:].lower()
+        if not _hex_ok(color):
+            raise ValueError("key background must be key:#rrggbb")
+        # An explicitly chosen key color is absent from the subject. Remove it
+        # even inside closed hair loops or handles, unlike edge-only auto fill.
+        diff = ImageChops.difference(img.convert("RGB"), Image.new("RGB", img.size, color))
+        r, g, b = diff.split()
+        mask = ImageChops.lighter(ImageChops.lighter(r, g), b).point(lambda v: 0 if v <= 30 else 255)
+        out = img.copy()
+        out.putalpha(ImageChops.multiply(img.getchannel("A"), mask))
+        return out
+    # Existing alpha is authoritative. RGB under transparent pixels is arbitrary.
+    if mode == "auto" and img.getchannel("A").getextrema()[0] < 255:
+        return img
     px = img.load()
     w, h = img.size
     if mode == "auto":
         corners = Counter(px[x, y][:3] for x, y in ((0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)))
         target = corners.most_common(1)[0][0]
     else:
+        if not _hex_ok(mode.lower()):
+            raise ValueError("background must be none, auto, or #rrggbb")
         target = tuple(int(mode[i:i + 2], 16) for i in (1, 3, 5))
     tol2 = 30 * 30
     def is_bg(x: int, y: int) -> bool:
@@ -326,32 +353,63 @@ def _strip_background(img: Image.Image, mode: str) -> Image.Image:
 
 
 def _square(img: Image.Image, size: int) -> Image.Image:
-    """Crop to the opaque bounding box, pad to a square, resample to an exact multiple of `size`."""
-    bbox = img.getbbox()
-    if bbox:
-        img = img.crop(bbox)
+    """Fit the subject inside a one-output-pixel margin without smoothing edges."""
+    bbox = img.getchannel("A").point(lambda a: 255 if a >= 128 else 0).getbbox()
+    if not bbox:
+        raise ValueError("image has no opaque pixels")
+    img = img.crop(bbox)
     w, h = img.size
-    side = max(w, h)
+    block = max(1, math.ceil(max(w, h) / (size - 2)))
+    side = size * block
     canvas = Image.new("RGBA", (side, side))
     canvas.paste(img, ((side - w) // 2, (side - h) // 2))
-    block = max(1, side // size)
-    target = size * block
-    return canvas.resize((target, target), Image.LANCZOS) if side != target else canvas
+    return canvas
 
 
 def import_png(src: Path, size: int, name: str | None, kind: str, palette: str, background: str = "none", colors: int = 16) -> Sheet:
+    if size not in SIZES or kind not in KINDS:
+        raise ValueError("unsupported size or kind")
+    if not 2 <= colors <= 16:
+        raise ValueError("colors must be between 2 and 16")
     img = Image.open(src).convert("RGBA")
     img = _strip_background(img, background)
-    if kind != "tile":
-        margin = max(1, img.width // size)          # one cell of transparent padding all round
-        framed = Image.new("RGBA", (img.width + 2 * margin, img.height + 2 * margin))
-        framed.paste(img, (margin, margin))
-        img = _square(framed, size)
+    # Native pixel art is already aligned. Preserve it byte-for-byte in geometry.
+    if kind != "tile" and img.size != (size, size):
+        img = _square(img, size)
     w, h = img.size
     if w != h:
         raise ValueError(f"source must be square, got {w}x{h}")
-    if w % size:
-        raise ValueError(f"source {w}px is not a multiple of {size}")
+    if w < size or w % size:
+        img = img.resize((size * max(1, w // size),) * 2, Image.Resampling.BOX)
+        w, h = img.size
+    master = palette_colors(palette, src.parent)
+    if master is None:
+        # Use the prepared alpha mask, not the background colors in the source.
+        sample = img.copy()
+        sample.thumbnail((256, 256), Image.Resampling.NEAREST)
+        opaque = [sample.getpixel((x, y))[:3] for y in range(sample.height) for x in range(sample.width)
+                  if sample.getpixel((x, y))[3] >= 128]
+        if not opaque:
+            raise ValueError("image has no opaque pixels")
+        tiny = Image.new("RGB", (len(opaque), 1))
+        tiny.putdata(opaque)
+        q = tiny.quantize(colors=colors, dither=Image.Dither.NONE).convert("RGB")
+        master = list(dict.fromkeys("#%02x%02x%02x" % q.getpixel((x, 0)) for x in range(q.width)))
+    if not master or len(master) > 256 or any(not _hex_ok(c) for c in master):
+        raise ValueError("palette must contain valid #rrggbb colors")
+    # Quantize BEFORE voting: a hundred close skin tones must beat one exact
+    # repeated background or outline tone. RGB majority on a painting is invalid.
+    pal_image = Image.new("P", (1, 1))
+    rgb_palette = [tuple(int(c[i:i + 2], 16) for i in (1, 3, 5)) for c in master]
+    pal_image.putpalette([v for c in rgb_palette for v in c] + list(rgb_palette[-1]) * (256 - len(master)))
+    rgb = img.convert("RGB")
+    unique = img.getcolors(maxcolors=256)
+    # Pillow's palette lookup uses a coarse cache. Already-indexed colors must
+    # not merge merely because two deliberately close shades share a cache cell.
+    indexed = unique and all(c[3] < 128 or c[:3] in rgb_palette for _, c in unique)
+    quantized = rgb if indexed else rgb.quantize(palette=pal_image, dither=Image.Dither.NONE).convert("RGB")
+    quantized.putalpha(img.getchannel("A"))
+    img = quantized
     block = w // size
     px = img.load()
     cells: list[list[tuple[int, int, int] | None]] = []
@@ -363,18 +421,13 @@ def import_png(src: Path, size: int, name: str | None, kind: str, palette: str, 
                 for x in range(gx * block, (gx + 1) * block):
                     r, g, b, a = px[x, y]
                     votes[None if a < 128 else (r, g, b)] += 1
-            row.append(votes.most_common(1)[0][0])
+            transparent = votes.pop(None, 0)
+            row.append(None if transparent >= block * block / 2 else votes.most_common(1)[0][0])
         cells.append(row)
-    # collapse to <= 16 colors: snap to the master palette, or quantize the cells themselves when custom
-    master = palette_colors(palette, src.parent)
-    if master is not None:
-        mapped = {c: _nearest(c, master) for row in cells for c in row if c is not None}
-    else:
-        opaque = [c for row in cells for c in row if c is not None]
-        tiny = Image.new("RGB", (len(opaque), 1))
-        tiny.putdata(opaque)
-        q = tiny.quantize(colors=min(colors, len(SYMBOLS)), method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE).convert("RGB")
-        mapped = {c: "#%02x%02x%02x" % q.getpixel((i, 0)) for i, c in enumerate(opaque)}
+    # Encode palette colors as symbols, keeping the output within 16 colors.
+    mapped = {c: "#%02x%02x%02x" % c for row in cells for c in row if c is not None}
+    if not mapped:
+        raise ValueError("image has no opaque pixels at the target size")
     ordered = list(dict.fromkeys(mapped[c] for row in cells for c in row if c is not None))
     if len(ordered) > len(SYMBOLS):
         # palette snap can still exceed 16 distinct colors; keep the 16 most frequent, remap the rest
@@ -397,6 +450,8 @@ DETAIL_DIVISOR = {"fine": None, "medium": 32, "coarse": 16}   # block = image wi
 def load_anchor(path: Path) -> dict:
     """Validate anchor.json (see references/anchor.md) and return it."""
     data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("anchor.json must be an object")
     problems = []
     if not isinstance(data.get("keep"), list) or not 1 <= len(data["keep"]) <= 8:
         problems.append("keep must list 1-8 things")
@@ -404,9 +459,24 @@ def load_anchor(path: Path) -> dict:
         problems.append(f"size must be one of {SIZES}")
     if data.get("kind") not in KINDS:
         problems.append(f"kind must be one of {KINDS}")
-    for i, region in enumerate(data.get("regions", [])):
+    if isinstance(data.get("keep"), list) and not all(isinstance(v, str) and v.strip() for v in data["keep"]):
+        problems.append("keep entries must be nonempty strings")
+    for field in ("drop", "colors"):
+        if not isinstance(data.get(field, []), list) or any(not isinstance(v, str) for v in data.get(field, [])):
+            problems.append(f"{field} must list strings")
+    palette = data.get("palette", [])
+    if not isinstance(palette, list) or len(palette) > 16 or any(not isinstance(c, str) or not _hex_ok(c) for c in palette):
+        problems.append("palette must list at most 16 lowercase #rrggbb colors")
+    regions = data.get("regions", [])
+    if not isinstance(regions, list):
+        problems.append("regions must be a list")
+        regions = []
+    for i, region in enumerate(regions):
+        if not isinstance(region, dict):
+            problems.append(f"regions[{i}] must be an object")
+            continue
         box = region.get("box")
-        if not (isinstance(box, list) and len(box) == 4 and all(0 <= v <= 1 for v in box) and box[0] < box[2] and box[1] < box[3]):
+        if not (isinstance(box, list) and len(box) == 4 and all(isinstance(v, (int, float)) and 0 <= v <= 1 for v in box) and box[0] < box[2] and box[1] < box[3]):
             problems.append(f"regions[{i}].box must be [x0, y0, x1, y1] in 0..1 with x0<x1, y0<y1")
         if region.get("detail") not in DETAIL_DIVISOR:
             problems.append(f"regions[{i}].detail must be one of {sorted(DETAIL_DIVISOR)}")
@@ -419,7 +489,7 @@ def mosaic(image: Path, anchor: dict, out: Path, background: str = "auto") -> Pa
     """Apply the anchor's detail budget: block-average each region at its divisor; `fine` regions stay untouched.
     Regions apply in order, later ones override earlier ones where they overlap. The background is stripped first
     (before any blurring moves its color), so everything downstream sees real transparency."""
-    img = _strip_background(Image.open(image).convert("RGBA"), background)
+    img = _strip_background(Image.open(image).convert("RGBA"), "none" if anchor["kind"] == "tile" else background)
     w, h = img.size
     result = img.copy()
     for region in anchor.get("regions", []):
@@ -429,40 +499,43 @@ def mosaic(image: Path, anchor: dict, out: Path, background: str = "auto") -> Pa
         if divisor is None:
             result.paste(img.crop((x0, y0, x1, y1)), (x0, y0))      # restore full detail from the source
             continue
-        block = max(2, w // divisor)
-        patch = img.crop((x0, y0, x1, y1))
-        small = patch.resize((max(1, patch.width // block), max(1, patch.height // block)), Image.BOX)
-        result.paste(small.resize(patch.size, Image.NEAREST), (x0, y0))
+        # One canvas-aligned grid, rather than a differently phased grid per box.
+        # Only color is simplified; the original alpha silhouette stays intact.
+        small = img.resize((divisor, max(1, round(h * divisor / w))), Image.Resampling.BOX)
+        blocked = small.resize(img.size, Image.Resampling.NEAREST)
+        result.paste(blocked.crop((x0, y0, x1, y1)), (x0, y0))
+    result.putalpha(img.getchannel("A"))
     out.parent.mkdir(parents=True, exist_ok=True)
     result.save(out)
     return out
 
 
-CONCEPT_STYLE = ("Pixel-art concept image of the subject. Flat colors, no gradients, no anti-aliasing, no texture. "
-                 "Subject centered, filling the frame, on a plain white background. Bold readable silhouette. "
-                 "Keep: {keep}. Do not draw: {drop}. Limit to about {colors} distinct colors.")
-
-
-def concept(pre: Path, anchor: dict, provider: str, out: Path) -> Path:
-    """Second pass: turn the pre-processed reference into a flat, centered concept image.
-
-    Providers:
-      none   - no image model; the mosaic image *is* the concept (default, costs nothing)
-      codex  - reserved: generate through the user's Codex CLI (implementation owned by Sol)
-      claude - reserved: the running Claude session redraws it as a flat illustration
-      api    - reserved: OpenAI / Gemini / Grok / Kimi image API with the user's own key
-    The prompt every provider must use is CONCEPT_STYLE filled from the anchor; see concept_prompt()."""
+def concept(pre: Path, anchor: dict, provider: str, out: Path, result: Path | None = None, background: str = "auto") -> Path:
+    """Import an assistant-produced concept; Python never launches an agent or pays for an API."""
     out.parent.mkdir(parents=True, exist_ok=True)
-    if provider == "none":
-        Image.open(pre).convert("RGBA").save(out)
-        return out
-    raise NotImplementedError(f"concept provider {provider!r} is reserved and not implemented yet; "
-                              f"run with --provider none, or hand this prompt to the provider yourself:\n{concept_prompt(anchor)}")
+    if provider != "none" and result is None:
+        raise ValueError(f"{provider} needs --result IMAGE from the current assistant's image tool or drawing tools; "
+                         "use --prompt-only to prepare it. No CLI or API is launched automatically.")
+    img = Image.open(result if result is not None else pre).convert("RGBA")
+    if anchor["kind"] != "tile":
+        img = _strip_background(img, background)
+    if not img.getchannel("A").point(lambda a: 255 if a >= 128 else 0).getbbox():
+        raise ValueError("concept image has no opaque pixels")
+    img.save(out)
+    return out
 
 
 def concept_prompt(anchor: dict) -> str:
-    return CONCEPT_STYLE.format(keep="; ".join(anchor["keep"]), drop="; ".join(anchor.get("drop", [])) or "nothing in particular",
-                                colors=min(16, 4 + 2 * len(anchor["keep"])))
+    framing = ("Opaque square tile, matching opposite edges, no border or centered emblem."
+               if anchor["kind"] == "tile" else
+               "Single isolated subject on true transparency, entire silhouette visible with a small empty margin.")
+    return (f"Game pixel-art concept: {anchor.get('subject', '')}. Target {anchor['size']}x{anchor['size']} logical pixels. "
+            "Redesign details at that resolution; use large connected flat color clusters, 2-3 shade steps per material, "
+            "one consistent pixel grid, top-left light, crisp stepped edges. No gradients, antialiasing, texture noise, "
+            "dithering, floating decorations, text or watermark. Preserve reference pose and proportions. "
+            f"{framing} Keep: {'; '.join(anchor['keep'])}. Omit: {'; '.join(anchor.get('drop', []))}. "
+            f"Palette: {', '.join(anchor.get('palette', anchor.get('colors', [])))}; at most 12-16 colors. "
+            "Read the original reference as well as the mosaic: restore identifying features the mosaic lost.")
 
 
 def smooth_sheet(sheet: Sheet, passes: int, keep: str) -> int:
@@ -483,8 +556,11 @@ def smooth_sheet(sheet: Sheet, passes: int, keep: str) -> int:
                     continue
                 opaque = [m for m in around if m != TRANSPARENT]
                 if opaque:
-                    grid[y][x] = max(set(opaque), key=opaque.count)
-                    changed += 1
+                    target = Counter(opaque).most_common(1)[0][0]
+                    # A high-contrast singleton can be an eye, glint or weapon tip.
+                    if _dist(sheet.colors[c], sheet.colors[target]) <= 48:
+                        grid[y][x] = target
+                        changed += 1
     sheet.rows = ["".join(r) for r in grid]
     return changed
 
@@ -492,7 +568,8 @@ def smooth_sheet(sheet: Sheet, passes: int, keep: str) -> int:
 REF_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp")
 
 
-def batch(src_dir: Path, out_dir: Path, provider: str, sizes: list[int] | None) -> int:
+def batch(src_dir: Path, out_dir: Path, provider: str, sizes: list[int] | None, concept_dir: Path | None = None,
+          concept_background: str = "auto") -> int:
     """One directory = one batch. Every <name>.anchor.json + sibling image becomes a base sheet
     (mosaic -> concept -> palette -> import -> smooth -> check -> render). The model-side
     erase-and-paint pass happens afterwards, per sheet, in queue or parallel mode -- never here."""
@@ -504,21 +581,36 @@ def batch(src_dir: Path, out_dir: Path, provider: str, sizes: list[int] | None) 
     jobs, failed = [], 0
     for apath in anchors:
         stem = apath.name[:-len(".anchor.json")]
-        job = {"name": stem, "anchor": str(apath), "status": "ok", "sheets": [], "problems": []}
+        job = {"name": stem, "anchor": apath.name, "status": "base-ready", "sheets": [], "problems": [],
+               "review": "pending"}
         jobs.append(job)
         try:
             anchor = load_anchor(apath)
+            if sizes:
+                anchor = dict(anchor, size=max(sizes))
             image = next((apath.with_name(stem + ext) for ext in REF_SUFFIXES if apath.with_name(stem + ext).exists()), None)
             if image is None:
                 raise FileNotFoundError(f"no reference image {stem}.png/.jpg next to the anchor")
             pre = mosaic(image, anchor, out_dir / f"{stem}.pre.png")
-            con = concept(pre, anchor, provider, out_dir / f"{stem}.concept.png")
+            prompt = out_dir / f"{stem}.prompt.txt"
+            prompt.write_text(concept_prompt(anchor), encoding="utf-8")
+            job["prompt"] = prompt.name
+            result = concept_dir / f"{stem}.png" if concept_dir else None
+            if provider != "none" and (result is None or not result.exists()):
+                job["status"] = "needs-concept"
+                job["problems"].append(f"Generate {stem}.png in a concept directory, then rerun with --concept-dir DIR")
+                continue
+            con = concept(pre, anchor, provider, out_dir / f"{stem}.concept.png", result, concept_background)
             pal_path = out_dir / f"{stem}.pal"
             pal_path.write_text("\n".join(extract_palette(con, len(SYMBOLS), anchor)) + "\n", encoding="utf-8")
             for size in sizes or [anchor["size"]]:
-                sheet = import_png(con, size, f"{stem}-{size}", anchor["kind"], pal_path.name, background="auto")
+                sheet = import_png(con, size, f"{stem}-{size}", anchor["kind"], pal_path.name, background="none")
                 sheet.path = out_dir / f"{stem}-{size}.pxg"      # check resolves the .pal relative to the sheet
+                # Fine regions already have a sampling budget; never blindly erase
+                # all isolated pixels before the assistant has inspected features.
                 smooth_sheet(sheet, 1, "")
+                used = {c for row in sheet.rows for c in row}
+                sheet.colors = {c: v for c, v in sheet.colors.items() if c in used}
                 errors, warnings = check(sheet)
                 spath = sheet.path
                 spath.write_text(sheet.dump(), encoding="utf-8")
@@ -529,25 +621,29 @@ def batch(src_dir: Path, out_dir: Path, provider: str, sizes: list[int] | None) 
                     render(sheet, out_dir)
                 job["problems"] += [f"{size}: (warn) {w}" for w in warnings]
                 job["sheets"].append(spath.name)
+            if job["status"] == "check-failed":
+                failed += 1
         except Exception as exc:                                    # one bad job must not sink the batch
             job["status"] = "failed"
             job["problems"].append(str(exc))
             failed += 1
     report_path = out_dir / "batch-report.json"
     report_path.write_text(json.dumps({"provider": provider, "jobs": jobs}, indent=2, ensure_ascii=False), encoding="utf-8")
-    todo = [j for j in jobs if j["status"] == "ok"]
+    todo = [j for j in jobs if j["status"] == "base-ready"]
     print(f"batch: {len(jobs)} jobs, {len(todo)} base sheets ready, {failed} failed -> {report_path}")
     for j in jobs:
-        mark = {"ok": "+", "check-failed": "!", "failed": "x"}[j["status"]]
+        mark = {"base-ready": "+", "needs-concept": "?", "check-failed": "!", "failed": "x"}[j["status"]]
         print(f"  {mark} {j['name']}: {', '.join(j['sheets']) or j['problems'][0]}")
     if todo:
         print("next: refine each base sheet against its anchor (erase + paint, <= 20 steps) -- queue or parallel per SKILL.md")
-    return 1 if failed else 0
+    return 1 if failed else (2 if any(j["status"] == "needs-concept" for j in jobs) else 0)
 
 
 def derive(sheet: Sheet, size: int) -> Sheet:
     """Majority-vote downsample a refined sheet to a smaller supported size. Refine once at the
     largest size, derive the rest; a mostly-transparent cell stays transparent."""
+    if size not in SIZES:
+        raise ValueError(f"size must be one of {SIZES}")
     factor, rem = divmod(sheet.size, size)
     if rem or factor < 2:
         raise ValueError(f"cannot derive {size} from {sheet.size}")
@@ -557,15 +653,15 @@ def derive(sheet: Sheet, size: int) -> Sheet:
         for x in range(size):
             votes = Counter(sheet.rows[y * factor + dy][x * factor + dx]
                             for dy in range(factor) for dx in range(factor))
-            top, cnt = votes.most_common(1)[0]
-            if top == TRANSPARENT and cnt <= (factor * factor) // 2:
-                top = next(c for c, _ in votes.most_common() if c != TRANSPARENT)
+            transparent = votes.pop(TRANSPARENT, 0)
+            top = TRANSPARENT if transparent >= factor * factor / 2 else votes.most_common(1)[0][0]
             row.append(top)
         rows.append("".join(row))
     used = {c for r in rows for c in r if c != TRANSPARENT}
     name = re.sub(r"-\d+$", "", sheet.name) + f"-{size}"
     return Sheet(name, size, sheet.kind, sheet.palette,
-                 {k: v for k, v in sheet.colors.items() if k in used}, rows)
+                 {k: v for k, v in sheet.colors.items() if k in used}, rows,
+                 sheet.path.with_name(f"{name}.pxg") if sheet.path else None)
 
 
 # ---------------------------------------------------------------- sheet
@@ -607,8 +703,8 @@ def build_sheet(src_dir: Path, out_dir: Path, columns: int) -> None:
         render(s, out_dir / "png")
         swatches = "".join(f'<i style="background:{v}" title="{k} {v}"></i>' for k, v in s.colors.items())
         cards.append(
-            f'<figure data-kind="{s.kind}"><img src="data:image/png;base64,{_b64png(img)}" width="{s.size}" height="{s.size}" alt="{s.name}">'
-            f'<figcaption><b>{s.name}</b><span>{s.size}×{s.size} · {s.kind} · {len(s.colors)} colors</span><div class="sw">{swatches}</div></figcaption></figure>')
+            f'<figure data-kind="{s.kind}"><img src="data:image/png;base64,{_b64png(img)}" width="{s.size}" height="{s.size}" alt="{escape(s.name)}">'
+            f'<figcaption><b>{escape(s.name)}</b><span>{s.size}×{s.size} · {s.kind} · {len(s.colors)} colors</span><div class="sw">{swatches}</div></figcaption></figure>')
     atlas.save(out_dir / "sheet.png")
     (out_dir / "sheet.json").write_text(json.dumps({"image": "sheet.png", "cell": cell, "frames": frames}, indent=2), encoding="utf-8")
     html = HTML.replace("{{CARDS}}", "\n".join(cards)).replace("{{COUNT}}", str(len(sheets))).replace("{{ATLAS}}", _b64png(atlas))
@@ -668,15 +764,19 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--background", default="auto", help="none | auto | #rrggbb - stripped before blocking")
     p = sub.add_parser("concept"); p.add_argument("image", type=Path, help="the pre-processed (mosaic) reference"); p.add_argument("--anchor", type=Path, required=True)
     p.add_argument("--provider", default="none", choices=("none", "codex", "claude", "api")); p.add_argument("-o", "--out", type=Path)
+    p.add_argument("--result", type=Path, help="concept PNG produced by the current assistant; required for non-none providers")
+    p.add_argument("--background", default="auto", help="none | auto | #rrggbb (edge fill) | key:#rrggbb (explicit key everywhere)")
     p.add_argument("--prompt-only", action="store_true", help="print the concept prompt for the chosen provider and exit")
     p = sub.add_parser("smooth"); p.add_argument("files", nargs="+", type=Path); p.add_argument("--passes", type=int, default=2)
     p.add_argument("--keep", default="", help="symbols never merged (eyes, highlights), e.g. BG")
-    p = sub.add_parser("derive"); p.add_argument("file", type=Path); p.add_argument("--sizes", required=True, help="comma list, e.g. 32,16")
+    p = sub.add_parser("derive"); p.add_argument("file", type=Path); p.add_argument("--sizes", required=True, help="comma list, e.g. 64,32")
     p.add_argument("--keep", default="", help="symbols the built-in speck pass must not merge (eyes, held objects)")
     p = sub.add_parser("show"); p.add_argument("file", type=Path); p.add_argument("--box", help="x0,y0,x1,y1 crop (inclusive); default whole sheet")
     p = sub.add_parser("batch"); p.add_argument("dir", type=Path); p.add_argument("-o", "--out", type=Path)
     p.add_argument("--provider", default="none", choices=("none", "codex", "claude", "api"))
-    p.add_argument("--sizes", help="comma list overriding each anchor's size, e.g. 64,32,16")
+    p.add_argument("--concept-dir", type=Path, help="assistant-produced <name>.png concepts; missing results are reported as needs-concept")
+    p.add_argument("--concept-background", default="auto", help="concept background: auto | none | key:#rrggbb")
+    p.add_argument("--sizes", help="comma list overriding each anchor's size, e.g. 128,64,32")
     a = ap.parse_args(argv)
 
     if a.cmd in ("check", "render"):
@@ -720,11 +820,16 @@ def main(argv: list[str] | None = None) -> int:
         if a.prompt_only:
             print(concept_prompt(anchor))
             return 0
-        out = concept(a.image, anchor, a.provider, a.out or a.image.with_name(a.image.stem.replace(".pre", "") + ".concept.png"))
+        out = concept(a.image, anchor, a.provider, a.out or a.image.with_name(a.image.stem.replace(".pre", "") + ".concept.png"), a.result, a.background)
         print(f"concept ({a.provider}) -> {out}")
         return 0
     if a.cmd == "derive":
         sheet = load(a.file)
+        errors, warnings = check(sheet)
+        if errors:
+            report(sheet, errors, warnings)
+            return 1
+        failed = 0
         for size in (int(v) for v in a.sizes.split(",")):
             if size not in SIZES:
                 print(f"--sizes must come from {SIZES}"); return 2
@@ -737,7 +842,8 @@ def main(argv: list[str] | None = None) -> int:
             out.write_text(small.dump(), encoding="utf-8")
             errors, warnings = check(small)
             report(small, errors, warnings)
-        return 0
+            failed += bool(errors)
+        return 1 if failed else 0
     if a.cmd == "show":
         sheet = load(a.file)
         x0, y0, x1, y1 = (int(v) for v in a.box.split(",")) if a.box else (0, 0, sheet.size - 1, sheet.size - 1)
@@ -751,18 +857,28 @@ def main(argv: list[str] | None = None) -> int:
         sizes = [int(v) for v in a.sizes.split(",")] if a.sizes else None
         if sizes and any(v not in SIZES for v in sizes):
             print(f"--sizes must come from {SIZES}"); return 2
-        return batch(a.dir, a.out or a.dir / "base", a.provider, sizes)
+        return batch(a.dir, a.out or a.dir / "base", a.provider, sizes, a.concept_dir, a.concept_background)
     if a.cmd == "smooth":
+        failed = 0
         for f in a.files:
             sh = load(f)
+            errors, warnings = check(sh)
+            if errors:
+                report(sh, errors, warnings)
+                failed += 1
+                continue
             n = smooth_sheet(sh, a.passes, a.keep)
             f.write_text(sh.dump(), encoding="utf-8")
             errors, warnings = check(sh)
             report(sh, errors, warnings)
             print(f"  merged {n} specks -> {f}")
-        return 0
+        return 1 if failed else 0
     return 2
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except (ValueError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        sys.exit(1)

@@ -4,6 +4,9 @@ import math
 
 class Grid:
     def __init__(self, n):
+        from picxel import SIZES
+        if n not in SIZES:
+            raise ValueError(f"size must be one of {SIZES}, got {n}")
         self.n = n
         self.g = [["."] * n for _ in range(n)]
 
@@ -35,13 +38,13 @@ class Grid:
                 if (d1 >= 0 and d2 >= 0 and d3 >= 0) or (d1 <= 0 and d2 <= 0 and d3 <= 0):
                     self.g[y][x] = c
 
-    def outline(self, c):
+    def outline(self, c, keep=()):
         """Every opaque pixel that touches transparency (4-way) or the sheet edge becomes c."""
         n = self.n
         sil = [[self.g[y][x] != "." for x in range(n)] for y in range(n)]
         for y in range(n):
             for x in range(n):
-                if not sil[y][x]:
+                if not sil[y][x] or self.g[y][x] in keep:
                     continue
                 for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
                     nx, ny = x + dx, y + dy
@@ -87,26 +90,30 @@ class Grid:
                 if self.g[y][x] == old:
                     self.g[y][x] = new
 
-    def smooth(self, passes=1, keep=()):
-        """Merge specks: a pixel with no same-color 8-neighbour takes its most common opaque neighbour. `keep` symbols are never changed."""
-        n = self.n
-        changed = 0
-        for _ in range(passes):
-            snap = [row[:] for row in self.g]
-            for y in range(n):
-                for x in range(n):
-                    c = snap[y][x]
-                    if c == "." or c in keep:
-                        continue
-                    around = [snap[y + dy][x + dx] for dx in (-1, 0, 1) for dy in (-1, 0, 1)
-                              if (dx or dy) and 0 <= x + dx < n and 0 <= y + dy < n]
-                    if c in around:
-                        continue
-                    opaque = [m for m in around if m != "."]
-                    if opaque:
-                        self.g[y][x] = max(set(opaque), key=opaque.count)
-                        changed += 1
+    def smooth(self, colors, passes=1, keep=()):
+        """Use the CLI's color-aware cleanup; high-contrast detail survives."""
+        from picxel import Sheet, smooth_sheet
+        sheet = Sheet("draft", self.n, "sprite", "custom", colors, self.rows())
+        changed = smooth_sheet(sheet, passes, keep)
+        self.g = [list(row) for row in sheet.rows]
         return changed
+
+    def line(self, x0, y0, x1, y1, c):
+        """Integer Bresenham line for handles, blades and deliberate diagonals."""
+        dx, dy = abs(x1 - x0), -abs(y1 - y0)
+        sx, sy = (1 if x0 < x1 else -1), (1 if y0 < y1 else -1)
+        error = dx + dy
+        while True:
+            self.put(c, (x0, y0))
+            if (x0, y0) == (x1, y1):
+                break
+            doubled = 2 * error
+            if doubled >= dy:
+                error += dy
+                x0 += sx
+            if doubled <= dx:
+                error += dx
+                y0 += sy
 
     def rows(self):
         return ["".join(r) for r in self.g]

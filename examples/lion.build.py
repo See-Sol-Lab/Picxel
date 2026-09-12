@@ -114,20 +114,5 @@ def lion32():
     g.write(OUT % 32, "lion-32", "sprite", COLORS)
 
 
-def lion16():
-    g = Grid(16); c = 8
-    g.disc(c, 7.5, 7, 6.5, "C")                      # mane
-    g.put("C", (2, 2), (3, 2), (12, 2), (13, 2), (2, 3), (13, 3))   # ears
-    g.rect(6, 14, 9, 14, "E")                        # chest hint
-    g.disc(c, 8.5, 4.5, 4, "E")                      # face
-    g.put("D", (3, 11), (4, 12), (5, 13), (11, 13), (12, 12), (13, 11), (12, 4), (13, 5), (13, 6))  # mane shadow
-    g.put("K", (2, 2), (13, 2))                      # ear inner (pink)
-    g.put("B", (6, 8), (6, 9), (10, 8), (10, 9))    # eyes: 1x2 pupils, nothing else at 16
-    g.put("A", (8, 10))                              # nose
-    g.put("I", (8, 11))                              # tongue
-    g.outline("A")
-    g.write(OUT % 16, "lion-16", "sprite", COLORS)
-
-
-lion64(); lion32(); lion16()
+lion64(); lion32()
 print("written")

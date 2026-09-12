@@ -31,9 +31,12 @@ Before touching a reference, look at it and write `anchor.json` next to it. The 
 }
 ```
 
-- `keep`: 3–6 things, ordered by importance. At 16 the first two survive; at 32 the first four; at 64 all of them. Write them as what a viewer must recognise, not as drawing instructions.
+- `keep`: 3–6 things, ordered by importance. At 32 prioritize the first few; at 64 preserve the main features; at 128 use the extra pixels for shape and feature clarity. Review each size instead of assuming all details survive. Write them as what a viewer must recognise, not as drawing instructions.
 - `drop`: what the reference has that the sprite must not try to carry. Everything high-frequency goes here: fur, strands, fabric weave, gradients, tiny jewellery.
 - `regions`: boxes in fractions of the image (`x0, y0, x1, y1`). `detail` is the budget for that area: `fine` stays untouched in the mosaic pass, `medium` is blocked at 1/32 of the image width, `coarse` at 1/16. Later regions override earlier ones where they overlap, so list the big soft areas first and the small sharp ones last.
 - `colors`: named in words; the palette step turns them into hex from the concept image.
+- Optional `palette`: explicit lowercase hex colors to reserve, e.g. `["#222034", "#ffffff", "#d95763"]`. It must fit the requested color count. Supply the complete shared palette to lock colors across related assets. Words in `colors` guide the assistant; they do not reserve numeric colors by themselves.
 
-Rules of thumb: hair, manes, foliage, cloth folds → `coarse`. Faces, hands, held objects, logos → `fine`. Bodies and clothing → `medium`. If you cannot name five things to keep, the size is too small for the subject or the subject is too busy for pixel art — say so instead of drawing.
+Rules of thumb: hair, manes, foliage, cloth folds → `coarse`. Faces, hands, held objects → `fine`. Bodies and clothing → `medium`. A simple item may need only a few anchors. The budget describes what matters, not a promise that an importer will understand anatomy.
+
+Mosaic color blocks align to the full image and retain the source alpha silhouette. Region boxes still refer to the original frame. After a concept changes pose, crop or proportions, look at it and update the boxes before palette weighting. The final review uses the original semantic `keep` list.
