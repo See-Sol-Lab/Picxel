@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Picxel</title>
+<style>
+:root{--bg:#161a22;--panel:#1c212b;--card:#232936;--fg:#e6e8ee;--dim:#8d94a5;--line:#2e3442;--accent:#6c5ce7;--ok:#3fb950;--warn:#e3b341;--bad:#f85149}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;display:flex;min-height:100vh}
+aside{width:340px;flex:none;background:var(--panel);border-right:1px solid var(--line);padding:24px 22px;display:flex;flex-direction:column;gap:18px}
+main{flex:1;padding:28px 32px;overflow:auto}
+h1{font-size:22px;margin:0}
+h1 small{font-size:12px;color:var(--dim);margin-left:8px;font-weight:normal}
+.sub{color:var(--dim);font-size:12px;margin-top:-12px}
+.step{font-size:12px;color:var(--dim);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px}
+button{background:#2b3140;color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:9px 14px;font:inherit;cursor:pointer}
+button:hover{background:#343b4c}
+button:disabled{opacity:.45;cursor:default}
+.path{font-size:12px;color:var(--dim);word-break:break-all;margin-top:6px;min-height:18px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.seg{display:inline-flex;background:#2b3140;border-radius:10px;padding:3px}
+.seg button{border:0;background:transparent;padding:6px 12px;border-radius:8px}
+.seg button.on{background:var(--accent);color:#fff}
+label.chk{display:flex;gap:8px;align-items:flex-start;color:var(--fg);cursor:pointer}
+label.chk input{margin-top:3px}
+label.chk small{display:block;color:var(--dim)}
+.hint{margin-top:auto;background:#12151c;border:1px dashed var(--line);border-radius:12px;padding:16px;text-align:center;color:var(--dim);line-height:1.7}
+.hint b{color:var(--fg);display:block;font-size:15px;margin-bottom:4px}
+.err{color:var(--bad);font-size:12px;min-height:18px}
+.center{height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;color:var(--dim);text-align:center}
+.spin{width:54px;height:54px;border:5px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:r 1s linear infinite}
+@keyframes r{to{transform:rotate(360deg)}}
+.banner{display:flex;gap:14px;align-items:center;margin-bottom:22px;flex-wrap:wrap}
+.pill{padding:4px 10px;border-radius:999px;font-size:12px;background:#2b3140}
+.pill.ok{background:#1f3a2a;color:var(--ok)}.pill.warn{background:#3a3220;color:var(--warn)}.pill.bad{background:#3a2323;color:var(--bad)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:26px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+.card .t{font-size:13px;color:var(--dim);margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .img{aspect-ratio:1;display:flex;align-items:center;justify-content:center;background:
+  linear-gradient(45deg,#2a3040 25%,transparent 25%,transparent 75%,#2a3040 75%),linear-gradient(45deg,#2a3040 25%,transparent 25%,transparent 75%,#2a3040 75%);
+  background-size:16px 16px;background-position:0 0,8px 8px;background-color:#20262f;border-radius:8px;overflow:hidden}
+.card img{max-width:100%;max-height:100%;image-rendering:pixelated}
+.card .miss{color:var(--dim);font-size:12px}
+.name{font-weight:600;margin:6px 0 8px}
+</style>
+<body>
+<aside>
+  <h1>Picxel <small id="ver">像素素材面板</small></h1>
+  <div class="sub">你选位置，AI 在对话里画，这里看结果。</div>
+
+  <div>
+    <div class="step">第一步 · 导入位置</div>
+    <div class="row">
+      <button id="pickImport">选择图片文件夹</button>
+      <button id="pickFiles">选几张图</button>
+    </div>
+    <div class="path" id="importPath">未选择</div>
+  </div>
+
+  <div>
+    <div class="step">第二步 · 导出位置</div>
+    <button id="pickExport">选择输出文件夹</button>
+    <div class="path" id="exportPath">默认为导入位置下的 picxel-out</div>
+  </div>
+
+  <div>
+    <div class="step">第三步 · 模式</div>
+    <div class="row">
+      <span class="seg"><button id="modeSingle" class="on">单张</button><button id="modeBatch">批量（≤20）</button></span>
+      <span class="seg" id="sizes"><button data-s="32">32</button><button data-s="64" class="on">64</button><button data-s="128">128</button></span>
+    </div>
+    <div style="height:10px"></div>
+    <label class="chk"><input type="checkbox" id="styleCheck" disabled><span>画风鉴定<small>批量导入前 AI 先看一遍画风，差得远的问你要不要统一</small></span></label>
+    <label class="chk"><input type="checkbox" id="parallel" disabled><span>子智能体并行<small>AI 开一批子智能体同时画：快，但更贵、更不精确。默认逐张画。</small></span></label>
+  </div>
+
+  <div class="err" id="err"></div>
+  <div class="hint" id="hint"><b>选择好导入位置和导出位置后</b>请与 AI 对话开始生图</div>
+</aside>
+
+<main id="main"><div class="center">面板会在这里显示结果。</div></main>
+
+<script>
+const $=s=>document.querySelector(s);
+let ui={import:"",export:"",files:[],mode:"single",sizes:[64],saved:null};
+const api=(p,b)=>fetch(p,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b||{})}).then(r=>r.json());
+function err(m){$("#err").textContent=m||""}
+function refreshSide(){
+  $("#importPath").textContent=ui.import?(ui.files.length?`${ui.import}（${ui.files.length} 张）`:ui.import):"未选择";
+  $("#exportPath").textContent=ui.export||"默认为导入位置下的 picxel-out";
+  $("#modeSingle").classList.toggle("on",ui.mode==="single");$("#modeBatch").classList.toggle("on",ui.mode==="batch");
+  document.querySelectorAll("#sizes button").forEach(b=>b.classList.toggle("on",ui.sizes.includes(+b.dataset.s)));
+  $("#styleCheck").disabled=$("#parallel").disabled=ui.mode!=="batch";
+  const ready=!!ui.import;
+  $("#hint").innerHTML=ready?"<b>位置已就绪</b>请与 AI 对话开始生图<br><span style='font-size:12px'>例如：“按面板的设置开始画”</span>":"<b>选择好导入位置和导出位置后</b>请与 AI 对话开始生图";
+}
+async function save(){
+  if(!ui.import)return;
+  err("");
+  const r=await api("/api/job",{import:ui.import,export:ui.export||ui.import+"/picxel-out",mode:ui.mode,files:ui.files,sizes:ui.sizes,
+    style_check:$("#styleCheck").checked,parallel:$("#parallel").checked});
+  if(r.error){err(r.error);return}
+  ui.saved=r.job;refreshSide();poll();
+}
+$("#pickImport").onclick=async()=>{const r=await api("/api/pick",{kind:"dir"});if(r.error)return err(r.error);if(r.paths[0]){ui.import=r.paths[0];ui.files=[];save()}};
+$("#pickFiles").onclick=async()=>{const r=await api("/api/pick",{kind:ui.mode==="single"?"file":"files"});if(r.error)return err(r.error);
+  if(r.paths.length){const p=r.paths[0].replace(/\\/g,"/");ui.import=p.slice(0,p.lastIndexOf("/"));ui.files=r.paths.map(x=>x.replace(/\\/g,"/").split("/").pop());save()}};
+$("#pickExport").onclick=async()=>{const r=await api("/api/pick",{kind:"dir"});if(r.error)return err(r.error);if(r.paths[0]){ui.export=r.paths[0];save()}};
+$("#modeSingle").onclick=()=>{ui.mode="single";save();refreshSide()};
+$("#modeBatch").onclick=()=>{ui.mode="batch";save();refreshSide()};
+document.querySelectorAll("#sizes button").forEach(b=>b.onclick=()=>{const s=+b.dataset.s;ui.sizes=ui.sizes.includes(s)?ui.sizes.filter(x=>x!==s):[...ui.sizes,s].sort((a,b)=>a-b);if(!ui.sizes.length)ui.sizes=[64];save();refreshSide()});
+$("#styleCheck").onchange=$("#parallel").onchange=save;
+
+function fmt(sec){sec=Math.floor(sec);return sec<60?`${sec} 秒`:`${Math.floor(sec/60)} 分 ${sec%60} 秒`}
+function render(st){
+  const m=$("#main");
+  if(!st.job){m.innerHTML='<div class="center">面板会在这里显示结果。</div>';return}
+  const s=st.status.state, started=st.status.started?new Date(st.status.started):null;
+  if(s==="waiting"){m.innerHTML=`<div class="center"><div>已记录 ${st.total} 张图 · 尺寸 ${st.job.sizes.join(" / ")}</div><div>等 AI 开始。</div></div>`;return}
+  if(s==="running"){
+    const el=started?fmt((Date.now()-started)/1000):"";
+    const stall=st.status.looks_stalled?`<div style="color:var(--warn)">${fmt(st.idle)} 没有新文件了——AI 可能停了（用量、网络或别的）。可以继续等，或者<button id="stopBtn" style="margin-left:6px">结束等待，看已完成的</button></div>`:"";
+    m.innerHTML=`<div class="center"><div class="spin"></div><div>AI 正在画 · 已用 ${el}</div><div>${st.done} / ${st.total} 张已有结果</div>${stall}</div>`;
+    const b=$("#stopBtn");if(b)b.onclick=()=>api("/api/stop").then(poll);
+    return}
+  // done / interrupted: cards for what exists, honest line for what doesn't
+  const ok=s==="done", pill=ok?`<span class="pill ok">生成成功 ${st.done} / ${st.total}</span>`:`<span class="pill warn">生成中断 · 完成 ${st.done} / ${st.total}</span>`;
+  const note=st.status.note?`<span class="pill">${st.status.note}</span>`:"";
+  let html=`<div class="banner">${pill}${note}<button id="openBtn">打开导出位置查看</button></div>`;
+  for(const [name,sizes] of Object.entries(st.results)){
+    html+=`<div class="name">${name}</div><div class="grid">`;
+    html+=`<div class="card"><div class="t">原图</div><div class="img"><img src="${st.originals[name]}"></div></div>`;
+    for(const sz of st.job.sizes){
+      html+=sizes[sz]?`<div class="card"><div class="t">${sz} × ${sz}</div><div class="img"><img src="${sizes[sz]}&t=${Date.now()}"></div></div>`
+                     :`<div class="card"><div class="t">${sz} × ${sz}</div><div class="img"><span class="miss">未生成</span></div></div>`;
+    }
+    html+=`</div>`;
+  }
+  m.innerHTML=html;$("#openBtn").onclick=()=>api("/api/open");
+}
+async function poll(){
+  try{const st=await (await fetch("/api/state")).json();
+    if(st.job&&!ui.saved){ui={import:st.job.import,export:st.job.export,files:st.job.files,mode:st.job.mode,sizes:st.job.sizes,saved:st.job};
+      $("#styleCheck").checked=st.job.style_check;$("#parallel").checked=st.job.parallel;refreshSide()}
+    render(st)}catch(e){}
+}
+refreshSide();poll();setInterval(poll,2000);
+</script>
+</body>
+</html>

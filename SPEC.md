@@ -45,6 +45,10 @@ Python 不调用对话工具，也不启动 Codex / Claude 子进程。
 - 效果图须检查真实 alpha、背景、姿势、锚定特征。默认 `auto` 剥离边界连通背景。明确选择主体不含的底色时，使用 `concept --background 'key:#ff00ff'` 或 `batch --concept-background 'key:#ff00ff'`，连发丝或把手内的封闭底色一起去掉。棋盘格不能冒充透明。
 - Picxel 不需要 API key；宿主工具可用性和用量限制由宿主决定。
 
+## 人类面板
+
+`panel` 起一个只依赖标准库的本地页面（http.server + tkinter 对话框）。人在页面上选导入/导出位置、单张或批量（≤20）、尺寸、画风鉴定与子智能体并行两个勾选；页面写 `~/.picxel/current-job.json` 和导出目录里的 `picxel.status.json`（waiting），不调用助手。助手用 `job show / start / done / stop --note` 读任务、标状态；页面轮询状态文件和导出目录里的 `<name>-<size>@4x.png`：running 时统一转圈计时（长时间无新文件提示可能中断，可手动结束等待），done / interrupted 时按素材一排排显示原图与各尺寸成品，缺的标"未生成"，并给出打开导出位置的按钮。
+
 ## 批量与验收
 
 已有外部效果图时直接进入效果图处理与取色，不重建原图马赛克。准备阶段及 `none` 本地路线继续生成所需马赛克。降采样使用每格颜色直方图计票，平票仍按原图行优先的首次出现顺序决胜，透明覆盖规则不变。

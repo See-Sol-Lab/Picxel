@@ -23,6 +23,15 @@ The assistant makes visual decisions; Python enforces the grid and exports. Requ
 6. **Eyes/mouth only when needed.** For complex faces, follow the face prompt and [faces.md](references/faces.md). Inspect the high-resolution original gaze before a local patch. Preserve eyebrows, nose, hair and eye contours; gaze outranks contrast. Clear faces stay unchanged. Do not smooth/outline after eye repair.
 7. **Deliver.** `sheet work -o work/dist` creates PNG/JSON and an HTML overview. Deliver selected final assets and a concise keep-feature review. Read the full JSON report only when the console summary lacks a needed detail.
 
+## The panel (when the user mentions it)
+
+`python scripts/picxel.py panel` opens a local page where the human picks the import folder (or a few images), the export folder, single vs batch (at most 20), sizes, and two batch checkboxes: style review and subagent parallel mode. There is no generate button: the page tells the user to talk to you. The page never drives you; it only writes a job file and watches the export folder.
+
+1. `job show` prints the job (import, export, files, sizes, style_check, parallel). Take paths and options from it instead of asking again.
+2. `job start` right before the first batch/refine step; the page shows one spinner with elapsed time.
+3. Work as usual, writing every final `<name>-<size>.png` / `@4x.png` into the export folder (`batch ... -o <export>`; refined sheets rendered there too). Style review only when `style_check` is true (`batch --style-check`). `parallel` true is the user's explicit permission for subagents; otherwise queue.
+4. `job done` at the end, or `job stop --note "why"` when you must stop early (quota, a failed asset you will not retry). Never leave it running: the page then shows cards for what exists and says "interrupted", which is what the user wants to see.
+
 ## Efficient operations
 
 Use `python scripts/picxel.py` before these commands:

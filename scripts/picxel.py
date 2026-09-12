@@ -1094,6 +1094,10 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("face"); p.add_argument("file", type=Path); p.add_argument("--anchor", type=Path, required=True)
     group = p.add_mutually_exclusive_group(required=True)
     group.add_argument("--prompt-only", action="store_true"); group.add_argument("--patch", type=Path)
+    p = sub.add_parser("panel", help="local page for the human: pick folders, watch progress, see results"); p.add_argument("--port", type=int, default=8770)
+    p.add_argument("--no-open", action="store_true", help="do not open the browser automatically")
+    p = sub.add_parser("job", help="the panel's job file: show it, or mark it start/done/stop"); p.add_argument("action", choices=("show", "start", "done", "stop"))
+    p.add_argument("--note", default="", help="shown on the panel, e.g. why it stopped")
     p = sub.add_parser("batch"); p.add_argument("dir", type=Path); p.add_argument("-o", "--out", type=Path)
     p.add_argument("--provider", default="none", choices=("none", "codex", "claude", "api"))
     p.add_argument("--concept-dir", type=Path, help="assistant-produced <name>.png concepts; missing results are reported as needs-concept")
@@ -1200,6 +1204,12 @@ def main(argv: list[str] | None = None) -> int:
         render(result, result.path.parent)
         print(f"face patch -> {result.path}; visually verify expression at native size and 4x")
         return 0
+    if a.cmd == "panel":
+        from panel import serve
+        return serve(a.port, not a.no_open)
+    if a.cmd == "job":
+        from panel import job_command
+        return job_command(a.action, a.note)
     if a.cmd == "batch":
         sizes = [int(v) for v in a.sizes.split(",")] if a.sizes else None
         if sizes and any(v not in SIZES for v in sizes):
