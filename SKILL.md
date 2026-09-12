@@ -54,14 +54,15 @@ Drawing from imagination misses what the reference shows (pose, tilt, proportion
 1. **Anchor.** Look at the image and write `<name>.anchor.json` (format: `references/anchor.md`): 3–6 things to keep, what to drop, regions with a detail budget (`coarse` / `medium` / `fine`), size, kind. This is free — you are the vision model.
 2. **Mosaic.** `mosaic ref.png --anchor ref.anchor.json` strips the background (corner flood fill) and blocks each region at its budget: hair and cloth go coarse, faces and held objects stay fine.
 3. **Concept** (optional). `concept ref.pre.png --anchor … --provider none` uses the mosaic as the concept. Providers `codex` / `claude` / `api` are reserved for a flat redraw with an image model and are not implemented yet; `--prompt-only` prints the prompt they must use.
-4. **Palette.** `palette ref.concept.png --colors 12 -o ref.pal` — colors come from the image, so hue never drifts.
+4. **Palette.** `palette ref.concept.png --anchor ref.anchor.json -o ref.pal` — colors come from the image, so hue never drifts. With the anchor, `fine` regions weigh 8x (an eye or a tongue survives), near-duplicate tones are merged (five almost-equal grays cannot hog the slots), and the darkest and lightest colors are always kept for outline and highlight.
 5. **Base sheet.** `import ref.concept.png --size 32 --kind sprite --palette ref.pal` — pose and silhouette land on the grid at zero cost.
 6. **Refine, ≤ 20 steps.** `smooth` first, then edit with `scripts/px.py`: `Grid.load()` the sheet, `erase()` what the downsample smeared, `replace()` a muddy color with its ramp neighbor, redraw the two or three `keep` features that got lost (eyes as dots, the held object's silhouette), `outline()`, `write()`. Render and look once in the middle and once at the end.
 7. **Verify.** Look at the `@4x.png` next to the anchor: is every `keep` item still recognisable? Answer yes/no per item in your report; a `no` on the first two items means redo, not deliver.
 
 Two rules learned the hard way:
 - **Erasing exposes what was behind.** `erase()` on a region shared with hair/body leaves a transparent notch — repaint the background layer before calling it done.
-- **Refine once, at the largest size.** Fix the 64 sheet, then majority-vote downsample it to 32 and 16 (2x2 / 4x4 cells); only tiny touch-ups (a lost held object, a two-pixel eye) happen at the small sizes. Never run the full refine three times.
+- **Refine once, at the largest size.** Fix the 64 sheet, then `derive big-64.pxg --sizes 32,16 --keep <eye/object symbols>`; only tiny touch-ups (a lost held object, a two-pixel eye) happen at the small sizes. Never run the full refine three times.
+- **Read only what you edit.** `show sheet.pxg --box x0,y0,x1,y1` prints just that window with its colors; a full 64x64 dump costs thousands of tokens and you never edit the whole sheet at once. Budget per refine: one `show` per area you touch, one render mid-way, one at the end.
 
 ## Batches
 
@@ -89,7 +90,9 @@ python scripts/picxel.py mosaic ref.png --anchor ref.anchor.json  # -> ref.pre.p
 python scripts/picxel.py concept ref.pre.png --anchor ref.anchor.json --provider none   # -> ref.concept.png
 python scripts/picxel.py palette ref.concept.png --colors 12 -o ref.pal
 python scripts/picxel.py smooth assets/hero.pxg --passes 2 --keep B  # merge specks; keep symbol B (eyes) untouched
-python scripts/picxel.py batch refs/ --sizes 64,32                # whole directory of <name>.anchor.json + image -> base sheets
+python scripts/picxel.py batch refs/ --sizes 64                   # whole directory of <name>.anchor.json + image -> base sheets
+python scripts/picxel.py derive refs/base/hero-64.pxg --sizes 32,16 --keep O   # small sizes from the refined 64
+python scripts/picxel.py show refs/base/hero-64.pxg --box 20,25,45,50          # ASCII window of one area
 ```
 
 Read the `@4x.png` after every render — that is your eyes. Open `dist/index.html` for the user: it is self-contained (zoom, checkerboard, kind filter, download links), no server needed.
