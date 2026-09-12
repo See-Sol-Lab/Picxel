@@ -1,0 +1,33 @@
+{
+  "provider": "none",
+  "jobs": [
+    {
+      "name": "lion",
+      "anchor": "lion.anchor.json",
+      "status": "ok",
+      "sheets": [
+        "lion-64.pxg",
+        "lion-32.pxg",
+        "lion-16.pxg"
+      ],
+      "problems": [
+        "16: (warn) declared but unused colors: P",
+        "16: (warn) 6 isolated pixels (warn above 3) — noise, or deliberate texture?"
+      ]
+    },
+    {
+      "name": "woman",
+      "anchor": "woman.anchor.json",
+      "status": "ok",
+      "sheets": [
+        "woman-64.pxg",
+        "woman-32.pxg",
+        "woman-16.pxg"
+      ],
+      "problems": [
+        "32: (warn) 4 isolated pixels (warn above 3) — noise, or deliberate texture?",
+        "16: (warn) 8 isolated pixels (warn above 3) — noise, or deliberate texture?"
+      ]
+    }
+  ]
+}

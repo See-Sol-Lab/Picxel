@@ -1,0 +1,78 @@
+{
+  "subject": "pale woman, long black curly hair, arms crossed, black pistol in her right hand, red-gold halter dress",
+  "kind": "sprite",
+  "size": 64,
+  "keep": [
+    "long black curly hair falling on both sides, wider than the body",
+    "arms crossed under the chest, pistol held on the viewer-right side, muzzle pointing right",
+    "red-gold halter dress with a high collar, bare shoulders",
+    "pale skin, red lips, half-lidded eyes as two dark strokes",
+    "black pistol silhouette clearly readable"
+  ],
+  "drop": [
+    "hair curl and strand texture",
+    "dress pattern and sheen detail",
+    "earrings",
+    "eyebrow, nose and makeup detail",
+    "skin shading gradients"
+  ],
+  "regions": [
+    {
+      "name": "hair",
+      "box": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+      ],
+      "detail": "coarse"
+    },
+    {
+      "name": "dress",
+      "box": [
+        0.25,
+        0.35,
+        0.78,
+        1.0
+      ],
+      "detail": "medium"
+    },
+    {
+      "name": "arms",
+      "box": [
+        0.15,
+        0.55,
+        0.85,
+        1.0
+      ],
+      "detail": "medium"
+    },
+    {
+      "name": "face",
+      "box": [
+        0.38,
+        0.1,
+        0.66,
+        0.35
+      ],
+      "detail": "fine"
+    },
+    {
+      "name": "gun",
+      "box": [
+        0.55,
+        0.5,
+        1.0,
+        0.82
+      ],
+      "detail": "fine"
+    }
+  ],
+  "colors": [
+    "black hair",
+    "pale skin",
+    "red-gold dress",
+    "red lips",
+    "dark gray gun"
+  ]
+}

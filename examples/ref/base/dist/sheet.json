@@ -1,0 +1,54 @@
+{
+  "image": "sheet.png",
+  "cell": 64,
+  "frames": {
+    "lion-16": {
+      "x": 0,
+      "y": 0,
+      "w": 16,
+      "h": 16,
+      "kind": "sprite",
+      "source": "lion-16.pxg"
+    },
+    "lion-32": {
+      "x": 64,
+      "y": 0,
+      "w": 32,
+      "h": 32,
+      "kind": "sprite",
+      "source": "lion-32.pxg"
+    },
+    "lion-64": {
+      "x": 128,
+      "y": 0,
+      "w": 64,
+      "h": 64,
+      "kind": "sprite",
+      "source": "lion-64.pxg"
+    },
+    "woman-16": {
+      "x": 192,
+      "y": 0,
+      "w": 16,
+      "h": 16,
+      "kind": "sprite",
+      "source": "woman-16.pxg"
+    },
+    "woman-32": {
+      "x": 256,
+      "y": 0,
+      "w": 32,
+      "h": 32,
+      "kind": "sprite",
+      "source": "woman-32.pxg"
+    },
+    "woman-64": {
+      "x": 320,
+      "y": 0,
+      "w": 64,
+      "h": 64,
+      "kind": "sprite",
+      "source": "woman-64.pxg"
+    }
+  }
+}

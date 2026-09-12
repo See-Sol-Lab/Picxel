@@ -59,6 +59,10 @@ Drawing from imagination misses what the reference shows (pose, tilt, proportion
 6. **Refine, ≤ 20 steps.** `smooth` first, then edit with `scripts/px.py`: `Grid.load()` the sheet, `erase()` what the downsample smeared, `replace()` a muddy color with its ramp neighbor, redraw the two or three `keep` features that got lost (eyes as dots, the held object's silhouette), `outline()`, `write()`. Render and look once in the middle and once at the end.
 7. **Verify.** Look at the `@4x.png` next to the anchor: is every `keep` item still recognisable? Answer yes/no per item in your report; a `no` on the first two items means redo, not deliver.
 
+Two rules learned the hard way:
+- **Erasing exposes what was behind.** `erase()` on a region shared with hair/body leaves a transparent notch — repaint the background layer before calling it done.
+- **Refine once, at the largest size.** Fix the 64 sheet, then majority-vote downsample it to 32 and 16 (2x2 / 4x4 cells); only tiny touch-ups (a lost held object, a two-pixel eye) happen at the small sizes. Never run the full refine three times.
+
 ## Batches
 
 Two modes; the user chooses:

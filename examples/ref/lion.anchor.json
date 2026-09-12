@@ -1,0 +1,69 @@
+{
+  "subject": "chibi lion cub, head tilted clockwise (its chin toward viewer's right), mouth open happily",
+  "kind": "sprite",
+  "size": 64,
+  "keep": [
+    "head tilt: the eye line slants, viewer-right eye clearly lower than viewer-left eye",
+    "two huge round dark eyes with white highlights",
+    "open smiling mouth with pink tongue and one tiny fang",
+    "fluffy two-tone mane (light top, darker edges) surrounding the whole head",
+    "round ears with pink inner, one each side of the mane",
+    "cream chest fluff at the bottom"
+  ],
+  "drop": [
+    "floating hearts and sparkle decorations",
+    "whiskers and blush strokes",
+    "individual fur strands and mane texture",
+    "white outer glow outline",
+    "background"
+  ],
+  "regions": [
+    {
+      "name": "mane",
+      "box": [
+        0.03,
+        0.05,
+        0.97,
+        1.0
+      ],
+      "detail": "coarse"
+    },
+    {
+      "name": "chest",
+      "box": [
+        0.3,
+        0.78,
+        0.75,
+        1.0
+      ],
+      "detail": "medium"
+    },
+    {
+      "name": "ears",
+      "box": [
+        0.18,
+        0.1,
+        0.9,
+        0.5
+      ],
+      "detail": "medium"
+    },
+    {
+      "name": "face",
+      "box": [
+        0.25,
+        0.4,
+        0.78,
+        0.82
+      ],
+      "detail": "fine"
+    }
+  ],
+  "colors": [
+    "warm tan fur",
+    "dark brown mane edge",
+    "cream muzzle and chest",
+    "near-black eyes",
+    "pink tongue and inner ear"
+  ]
+}
