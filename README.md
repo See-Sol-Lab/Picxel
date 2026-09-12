@@ -26,7 +26,7 @@ git clone https://github.com/See-Sol-Lab/Picxel.git ~/.claude/skills/picxel
 ```bash
 # 完全本地的自动底稿
 python scripts/picxel.py batch examples/ref -o examples/out/local-32plus --sizes 128,64,32
-# 多图首次会生成 batch.style.json 并等待助手完成风格鉴定。
+# 画风鉴定默认关闭；加 --style-check（面板上是一个勾选框）时，多图首次会生成 batch.style.json 并等待助手完成风格鉴定。
 # 一致则直接继续；明显异类由用户选择保留原风格或统一。
 
 # 助手生图路线：准备提示词，再由当前助手生成 concepts/<name>.png

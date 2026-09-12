@@ -817,7 +817,7 @@ def batch_style(src_dir: Path, images: dict[str, Path]) -> tuple[dict | None, st
 
 
 def batch(src_dir: Path, out_dir: Path, provider: str, sizes: list[int] | None, concept_dir: Path | None = None,
-          concept_background: str = "auto", only: list[str] | None = None) -> int:
+          concept_background: str = "auto", only: list[str] | None = None, style_check: bool = True) -> int:
     """One directory = one batch. Every <name>.anchor.json + sibling image becomes a base sheet
     (mosaic -> concept -> palette -> import -> smooth -> check -> render). The model-side
     erase-and-paint pass happens afterwards, per sheet, in queue or parallel mode -- never here."""
@@ -835,7 +835,8 @@ def batch(src_dir: Path, out_dir: Path, provider: str, sizes: list[int] | None, 
         image = next((apath.with_name(stem + ext) for ext in REF_SUFFIXES if apath.with_name(stem + ext).exists()), None)
         if image is not None:
             images[stem] = image
-    style, style_problem = batch_style(src_dir, images)
+    # Style review is opt-in (CLI --style-check / the panel checkbox); by default each asset is drawn as it is.
+    style, style_problem = batch_style(src_dir, images) if style_check else (None, "")
     jobs, failed = [], 0
     for apath in anchors:
         stem = apath.name[:-len(".anchor.json")]
@@ -1098,6 +1099,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--concept-dir", type=Path, help="assistant-produced <name>.png concepts; missing results are reported as needs-concept")
     p.add_argument("--concept-background", default="auto", help="concept background: auto | none | key:#rrggbb")
     p.add_argument("--sizes", help="comma list overriding each anchor's size, e.g. 128,64,32")
+    p.add_argument("--style-check", action="store_true", help="multi-image batches: review art-style consistency first (off by default)")
     p.add_argument("--only", nargs="+", help="process only these asset names; still use the full batch's style review")
     a = ap.parse_args(argv)
 
@@ -1202,7 +1204,7 @@ def main(argv: list[str] | None = None) -> int:
         sizes = [int(v) for v in a.sizes.split(",")] if a.sizes else None
         if sizes and any(v not in SIZES for v in sizes):
             print(f"--sizes must come from {SIZES}"); return 2
-        return batch(a.dir, a.out or a.dir / "base", a.provider, sizes, a.concept_dir, a.concept_background, a.only)
+        return batch(a.dir, a.out or a.dir / "base", a.provider, sizes, a.concept_dir, a.concept_background, a.only, a.style_check)
     if a.cmd == "smooth":
         failed = 0
         for f in a.files:

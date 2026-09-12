@@ -1,6 +1,6 @@
 # Batch concept style review
 
-Applies to batches with at least two reference images. A single image keeps the original concept flow. The current assistant performs visual assessment; Python cannot infer art style from color counts or filenames.
+Opt-in: runs only with `batch --style-check` (the panel's checkbox). Applies to batches with at least two reference images. A single image keeps the original concept flow. The current assistant performs visual assessment; Python cannot infer art style from color counts or filenames.
 
 ## Assess before generating concepts
 
