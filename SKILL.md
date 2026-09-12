@@ -66,6 +66,14 @@ Two modes; the user chooses:
 - **parallel** — split the manifest across subagents, one asset each, same steps; fast, several times the tokens.
 Batch runs never edit interactively; assets that fail verification go to a redo list, which the user reopens one at a time in single mode. Steps 1–4 for the whole manifest first, then 5–7.
 
+The deterministic half is one command. Put each reference image next to its `<name>.anchor.json` in one directory (you write the anchors first — that is step 1 for the whole batch), then:
+
+```bash
+python scripts/pixelgrid.py batch refs/ --sizes 32          # -> refs/base/: pre, concept, .pal, base .pxg + renders, batch-report.json
+```
+
+One bad job never sinks the batch — it lands in the report as `failed`. After `batch`, only steps 6–7 (refine + verify) remain per sheet; that is where queue vs parallel applies.
+
 ## Commands
 
 ```bash
@@ -77,6 +85,7 @@ python scripts/pixelgrid.py mosaic ref.png --anchor ref.anchor.json  # -> ref.pr
 python scripts/pixelgrid.py concept ref.pre.png --anchor ref.anchor.json --provider none   # -> ref.concept.png
 python scripts/pixelgrid.py palette ref.concept.png --colors 12 -o ref.pal
 python scripts/pixelgrid.py smooth assets/hero.pxg --passes 2 --keep B  # merge specks; keep symbol B (eyes) untouched
+python scripts/pixelgrid.py batch refs/ --sizes 64,32                # whole directory of <name>.anchor.json + image -> base sheets
 ```
 
 Read the `@4x.png` after every render — that is your eyes. Open `dist/index.html` for the user: it is self-contained (zoom, checkerboard, kind filter, download links), no server needed.

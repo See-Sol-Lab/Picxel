@@ -13,6 +13,8 @@
     pixelgrid.py concept <ref.pre.png> --anchor anchor.json [--provider none|codex|claude|api]
                                                    flat concept image (providers other than none are reserved)
     pixelgrid.py smooth <file.pxg>... [--passes N] [--keep SYMS]   merge specks in place
+    pixelgrid.py batch  <DIR> [-o OUT] [--provider P] [--sizes 64,32]
+                                                   every <name>.anchor.json + image in DIR -> base sheets + batch-report.json
 
 Only Pillow is required. Sizes are fixed at 16, 32, 64.
 """
@@ -440,6 +442,62 @@ def smooth_sheet(sheet: Sheet, passes: int, keep: str) -> int:
     return changed
 
 
+REF_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp")
+
+
+def batch(src_dir: Path, out_dir: Path, provider: str, sizes: list[int] | None) -> int:
+    """One directory = one batch. Every <name>.anchor.json + sibling image becomes a base sheet
+    (mosaic -> concept -> palette -> import -> smooth -> check -> render). The model-side
+    erase-and-paint pass happens afterwards, per sheet, in queue or parallel mode -- never here."""
+    anchors = sorted(src_dir.glob("*.anchor.json"))
+    if not anchors:
+        print(f"no *.anchor.json in {src_dir}")
+        return 1
+    out_dir.mkdir(parents=True, exist_ok=True)
+    jobs, failed = [], 0
+    for apath in anchors:
+        stem = apath.name[:-len(".anchor.json")]
+        job = {"name": stem, "anchor": str(apath), "status": "ok", "sheets": [], "problems": []}
+        jobs.append(job)
+        try:
+            anchor = load_anchor(apath)
+            image = next((apath.with_name(stem + ext) for ext in REF_SUFFIXES if apath.with_name(stem + ext).exists()), None)
+            if image is None:
+                raise FileNotFoundError(f"no reference image {stem}.png/.jpg next to the anchor")
+            pre = mosaic(image, anchor, out_dir / f"{stem}.pre.png")
+            con = concept(pre, anchor, provider, out_dir / f"{stem}.concept.png")
+            pal_path = out_dir / f"{stem}.pal"
+            pal_path.write_text("\n".join(extract_palette(con, len(SYMBOLS))) + "\n", encoding="utf-8")
+            for size in sizes or [anchor["size"]]:
+                sheet = import_png(con, size, f"{stem}-{size}", anchor["kind"], pal_path.name, background="auto")
+                sheet.path = out_dir / f"{stem}-{size}.pxg"      # check resolves the .pal relative to the sheet
+                smooth_sheet(sheet, 1, "")
+                errors, warnings = check(sheet)
+                spath = sheet.path
+                spath.write_text(sheet.dump(), encoding="utf-8")
+                if errors:
+                    job["status"] = "check-failed"
+                    job["problems"] += [f"{size}: {e}" for e in errors]
+                else:
+                    render(sheet, out_dir)
+                job["problems"] += [f"{size}: (warn) {w}" for w in warnings]
+                job["sheets"].append(spath.name)
+        except Exception as exc:                                    # one bad job must not sink the batch
+            job["status"] = "failed"
+            job["problems"].append(str(exc))
+            failed += 1
+    report_path = out_dir / "batch-report.json"
+    report_path.write_text(json.dumps({"provider": provider, "jobs": jobs}, indent=2, ensure_ascii=False), encoding="utf-8")
+    todo = [j for j in jobs if j["status"] == "ok"]
+    print(f"batch: {len(jobs)} jobs, {len(todo)} base sheets ready, {failed} failed -> {report_path}")
+    for j in jobs:
+        mark = {"ok": "+", "check-failed": "!", "failed": "x"}[j["status"]]
+        print(f"  {mark} {j['name']}: {', '.join(j['sheets']) or j['problems'][0]}")
+    if todo:
+        print("next: refine each base sheet against its anchor (erase + paint, <= 20 steps) -- queue or parallel per SKILL.md")
+    return 1 if failed else 0
+
+
 # ---------------------------------------------------------------- sheet
 
 def _b64png(img: Image.Image) -> str:
@@ -542,6 +600,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--prompt-only", action="store_true", help="print the concept prompt for the chosen provider and exit")
     p = sub.add_parser("smooth"); p.add_argument("files", nargs="+", type=Path); p.add_argument("--passes", type=int, default=2)
     p.add_argument("--keep", default="", help="symbols never merged (eyes, highlights), e.g. BG")
+    p = sub.add_parser("batch"); p.add_argument("dir", type=Path); p.add_argument("-o", "--out", type=Path)
+    p.add_argument("--provider", default="none", choices=("none", "codex", "claude", "api"))
+    p.add_argument("--sizes", help="comma list overriding each anchor's size, e.g. 64,32,16")
     a = ap.parse_args(argv)
 
     if a.cmd in ("check", "render"):
@@ -588,6 +649,11 @@ def main(argv: list[str] | None = None) -> int:
         out = concept(a.image, anchor, a.provider, a.out or a.image.with_name(a.image.stem.replace(".pre", "") + ".concept.png"))
         print(f"concept ({a.provider}) -> {out}")
         return 0
+    if a.cmd == "batch":
+        sizes = [int(v) for v in a.sizes.split(",")] if a.sizes else None
+        if sizes and any(v not in SIZES for v in sizes):
+            print(f"--sizes must come from {SIZES}"); return 2
+        return batch(a.dir, a.out or a.dir / "base", a.provider, sizes)
     if a.cmd == "smooth":
         for f in a.files:
             sh = load(f)
