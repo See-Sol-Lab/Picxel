@@ -1,62 +1,49 @@
 ---
 name: picxel
-description: Create and refine batches of pixel-art game assets in Claude Code or Codex. Convert references or descriptions into palette-indexed 32/64/128 PNGs, editable text grids and spritesheets using the current assistant's drawing or image tools, without requiring an API key.
+description: Create and refine pixel-art game assets in Claude Code or Codex: references or descriptions to palette-indexed 32/64/128 PNGs, editable grids and spritesheets, using current-session drawing or image tools without requiring an API key.
 ---
 
 # Picxel
 
-You are the artist. Python handles grid alignment, palette reduction, validation and packing. Run commands from this skill's directory or use absolute script paths. Requires Python 3.10+ and Pillow.
+The assistant makes visual decisions; Python enforces the grid and exports. Requires Python 3.10+ and Pillow. Run from this directory or use absolute script paths.
 
-## Output contract
+## Contract
 
-- Square 32, 64 or 128 logical pixels. `item` / `sprite` have transparent corners; leave one pixel of breathing room. `tile` fills the canvas and repeats.
-- Use 32 for compact simple assets, 64 for general assets, and 128 for detailed silhouettes or larger subjects. Generate or import from a detailed source at the intended size; enlarging a finished 64px sprite does not create 128px detail.
-- `.pxg` holds one palette symbol per pixel: `A`–`P`, `.` transparent, at most 16 colors. PNG alpha is binary; previews use nearest neighbor.
-- Use DB32 or a shared `.pal` for related assets. Imports may use `custom`. Aim for 4–8 colors on an item/tile, 8–16 on a portrait; 2–3 connected shade clusters per material.
-- Passing `check` establishes format correctness, not artistic quality. `batch` emits **base-ready**, with visual review **pending**. Do not call unreviewed output game-ready.
+- Output only requested sizes: 32, 64 or 128. Use 64 when unspecified; 32 for compact props, 128 for detailed subjects. Import larger sizes from a detailed source, not an enlarged small sprite.
+- `.pxg`: symbols A–P, `.` transparent, at most 16 colors. Items/sprites need transparent corners; tiles repeat. Use coherent material ramps and preserve identifying features.
+- `base-ready` is format success, not visual approval. Keep failures and pending choices visible.
 
-## Choose the shortest drawing route
+## Workflow
 
-For simple props and tiles, use a small build script with `scripts/px.py`: silhouette → material blocks → broad shadows → identifying details. `Grid.rect`, `disc`, `tri`, `line`, `put` place exact pixels. Render and inspect. A potion reads from its bottle and liquid, not scattered texture. Start at the intended gameplay size.
+1. **Inspect once, annotate.** Look at originals together; write one `<name>.anchor.json` per asset using [anchor.md](references/anchor.md). Record only useful keep/drop/region information. For visible faces, assess complexity and original gaze per [faces.md](references/faces.md); plain objects skip that path.
+2. **Batch style.** With two or more images, follow [batch-style.md](references/batch-style.md). Complete the generated `batch.style.json` visually; compatible assets need no question. Ask only about substantial outliers and honor the user's original/unify choice. `--only` still uses this full-batch context.
+3. **Prepare concepts.** `batch refs -o work --provider codex --sizes 64` prints the next actions. Read only the needed prompt files. Generate/inspect the first baseline, then use approved concepts as style references where instructed. One concept per asset serves all requested sizes. Save the exact reported filename (`name.png` or `name.unified.png`) to `concepts/`. Inspect composition before import; regenerate only a failed asset.
+4. **Finish locally.** `batch refs -o work --provider codex --concept-dir concepts --sizes 64`. Existing concepts skip mosaic work. Use `--concept-background 'key:#ff00ff'` for an intentionally chosen magenta key; real alpha is preferable. A painted checkerboard is not transparency.
+5. **Review and edit selectively.** Inspect native/enlarged previews, using a batch overview first and detail crops for uncertain assets. Apply [checklist.md](references/checklist.md). For edits, `show` gives a short palette summary; `show --box ...` prints just the necessary window. Use `Grid.load()`, shape operations and `write()`; do not rewrite or read a whole 128-row grid for a few pixels. Group related changes in one build script, render, inspect. Passing results need no invented fixes.
+6. **Eyes/mouth only when needed.** For complex faces, follow the face prompt and [faces.md](references/faces.md). Inspect the high-resolution original gaze before a local patch. Preserve eyebrows, nose, hair and eye contours; gaze outranks contrast. Clear faces stay unchanged. Do not smooth/outline after eye repair.
+7. **Deliver.** `sheet work -o work/dist` creates PNG/JSON and an HTML overview. Deliver selected final assets and a concise keep-feature review. Read the full JSON report only when the console summary lacks a needed detail.
 
-For complex reference art, use the pipeline below. A native image tool can simplify anatomy and materials into a concept; the importer enforces the final grid. High-resolution generated pixels are not automatically a valid final sprite.
+## Efficient operations
 
-## Reference pipeline
+Use `python scripts/picxel.py` before these commands:
 
-1. **Anchor.** Look at the original; write `<name>.anchor.json` using [references/anchor.md](references/anchor.md). Record pose, silhouette and 3–6 identifying features in priority order. Identify which survive at 32, 64 and 128. Keep each reference and anchor in `refs/`.
-2. **Prepare.** Run `python scripts/picxel.py batch refs -o work --provider codex --sizes 64`. This writes mosaics and prompts. Exit 2 and `needs-concept` mean the assistant must supply concepts. Inspect the mosaic beside the original: it can already lose identifying features.
-3. **Produce concepts in the current session.** Inspect actual available tools. With a native image tool, supply the original, mosaic when helpful, and `work/<name>.prompt.txt`. Save selected output to `concepts/<name>.png`, one image call per asset. Request broad flat clusters, consistent outline and logical grid, matching style across the batch.
-   - `codex` is a handoff label. Python never launches `codex exec` and cannot invoke a tool belonging to a running assistant.
-   - For Claude Code, use an image tool if that session has one; otherwise draw a flat concept or the final grid with code. The `claude` label consumes that PNG. Distinguish drawing code from native image generation in reports.
-   - `none` uses the mosaic locally. It is an inexpensive draft and cannot semantically redesign hair, hands or textures.
-   - `api` accepts an externally supplied concept. Picxel has no API client, never requests a key and never silently switches to a paid call. Native tools remain subject to host-plan limits.
-4. **Inspect concepts.** Verify pose and features. Check real alpha: a painted checkerboard is not transparency. Prefer alpha; if a tool supplies an opaque image, request one flat key color absent from the subject (e.g. magenta). Use `concept --background 'key:#ff00ff'` or `batch --concept-background 'key:#ff00ff'` for that intentionally chosen key: it removes enclosed holes too. Default `auto` removes edge-connected background only. Complex backgrounds need a mask/redraw; corner fill is not semantic segmentation. Generated gradients are quantized in the next step.
-5. **Import.** Run `python scripts/picxel.py batch refs -o work --provider codex --concept-dir concepts --sizes 64`. Non-`none` providers consume `<name>.png`. Missing concepts remain `needs-concept`; one failure does not abort the batch. Use a fresh work directory for an independent batch.
-6. **Refine.** Inspect native size AND 4×. `Grid.load()` → fix the largest silhouette/material error → restore identifying features. Use `show --box` to read the region you edit. `Grid.smooth(colors, keep="...")` merges low-contrast specks; `outline(color, keep="...")` protects specified tips/highlights. Paint outlines before final features or protect those features: an inside outline can erase a narrow handle or finger. Around 20 shape operations is a useful budget, not permission to deliver a failed image.
-7. **Verify.** Apply [references/checklist.md](references/checklist.md), with a mid-pass and final visual inspection. Record yes/no per required anchor feature and unresolved defects. Failed primary features go to rework. Blocky photographic texture is still a failed style conversion.
+```text
+batch refs -o work --provider none --sizes 64
+batch refs -o work --provider codex --concept-dir concepts --sizes 128,64
+```
 
-`derive` is a starting point for smaller sizes. `--keep` protects cleanup only; it cannot restore a feature that lost the downsampling vote. Touch up eyes/handles at the final resolution. Draw a distinct small silhouette when needed instead of forcing every portrait detail into 32px.
-
-## Batch orchestration
-
-Prepare anchors and concepts first, then import, refine and review. Queue is the default; use subagents only when the user explicitly requests parallel agent work. Keep related assets on one palette, view, light direction and outline policy. A complete 16-color hex `palette` in the anchors locks batch colors; shorter lists reserve those colors and allow additional picks. Region boxes refer to the input frame; update them if the concept changes framing.
-
-## Commands
+For targeted rework and inspection:
 
 ```bash
-python scripts/picxel.py batch refs -o work --provider none --sizes 64
-python scripts/picxel.py concept work/hero.pre.png --anchor refs/hero.anchor.json --prompt-only
-python scripts/picxel.py concept work/hero.pre.png --anchor refs/hero.anchor.json --provider codex --result concepts/hero.png -o work/hero.concept.png
-python scripts/picxel.py palette work/hero.concept.png --anchor refs/hero.anchor.json --colors 12 -o work/hero.pal
-python scripts/picxel.py import work/hero.concept.png --size 64 --palette work/hero.pal -o work/hero-64.pxg
-python scripts/picxel.py show work/hero-64.pxg --box 20,25,45,50
-python scripts/picxel.py smooth work/hero-64.pxg --passes 1 --keep BC
-python scripts/picxel.py derive work/hero-64.pxg --sizes 32 --keep BC
-# For a 128px master, derive its 64/32 variants:
-python scripts/picxel.py derive work/hero-128.pxg --sizes 64,32 --keep BC
-python scripts/picxel.py check work/hero-64.pxg
-python scripts/picxel.py render work/hero-64.pxg -o work
+python scripts/picxel.py batch refs -o redo --provider codex --concept-dir concepts --only hero potion --sizes 64
+python scripts/picxel.py show work/hero-64.pxg
+python scripts/picxel.py show work/hero-64.pxg --box 25,12,39,20
+python scripts/picxel.py face work/hero-64.pxg --anchor refs/hero.anchor.json --patch work/hero.face.json
 python scripts/picxel.py sheet work -o work/dist
 ```
 
-Deliver the self-contained `dist/index.html`, PNG/JSON and the visual review. Animation, non-square frames and an interactive editor are outside the format. See [SPEC.md](SPEC.md) for grid syntax, [references/palettes.md](references/palettes.md) for DB32 ramps and [examples/lion.build.py](examples/lion.build.py) for drawing syntax (an early experiment, not a quality target).
+`--only` processes named assets, preserves unrelated outputs, and writes a report for that invocation. Use a separate redo folder when retaining reviewed results; do not rerun the whole batch just to package it. `show --full` is available only when the entire grid is actually needed. After major edits to a larger sprite, `derive big-128.pxg --sizes 64,32` can create smaller starting points, but inspect their eyes/handles independently.
+
+For simple assets without references, draw directly with `scripts/px.py`: `Grid(n)`, `rect`, `disc`, `tri`, `line`, `put`, `outline`, `write`. Shapes cost fewer decisions than ASCII rows. Draw outline before important small features or protect them with `keep`. Palette format: [palettes.md](references/palettes.md); grid format: [SPEC.md](SPEC.md).
+
+`codex/claude/api` are concept-source labels, not subprocess/API clients. Use actual current-session capabilities; without an image tool, draw with code. `none` is local mosaic drafting and cannot perform a requested style redraw. No silent paid fallback. Queue is the default; subagents require explicit user request. No animation/editor/panel work is included here.

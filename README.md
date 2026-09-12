@@ -6,6 +6,8 @@
 - 32 适合简洁物品，64 适合常规素材，128 用于更丰富的轮廓与细节。16×16 已退出生成和校验规格；历史对比图片保留作记录。
 - 可编辑 `.pxg` 文本网格、原尺寸 PNG、4× 预览、精灵表 PNG + JSON、自包含 HTML 总览。
 - 简单物品可以用绘图指令直接画；复杂参考图由当前助手可用的生图工具先出效果图，再变成严格网格。
+- 单张沿用原图风格。批量先由助手看图鉴定，明显异类才询问“保留原图风格 / 统一画风”；选统一后参照同批已确定的效果图画风，保留原主体与关键特征。
+- 人物、动物可附加面部检查：清晰的面部保留；复杂面部在像素化后只检查并按需修画眼睛和嘴巴，原图视线方向、眼仁与眼白位置优先；眉毛、鼻子和其他区域保持原样。普通物品跳过。详见 [面部规程](references/faces.md)。
 - 自动底稿仍需看图验收，不能保证任意照片一键变成可交付像素画。
 
 ## 安装
@@ -24,10 +26,12 @@ git clone https://github.com/See-Sol-Lab/Picxel.git ~/.claude/skills/picxel
 ```bash
 # 完全本地的自动底稿
 python scripts/picxel.py batch examples/ref -o examples/out/local-32plus --sizes 128,64,32
+# 多图首次会生成 batch.style.json 并等待助手完成风格鉴定。
+# 一致则直接继续；明显异类由用户选择保留原风格或统一。
 
 # 助手生图路线：准备提示词，再由当前助手生成 concepts/<name>.png
 python scripts/picxel.py batch examples/ref -o examples/out/assisted --provider codex --sizes 64
-# 退出码 2 = needs-concept，助手需要生成效果图。
+# 风格检查与必要的用户选择完成后，needs-concept 表示等待效果图。
 python scripts/picxel.py batch examples/ref -o examples/out/assisted --provider codex --concept-dir concepts --sizes 64
 
 # 助手看图、修画、验收后打包
@@ -37,6 +41,14 @@ python -m unittest discover -s tests -v
 
 `provider` 是效果图来源：`none` 用马赛克底稿；`codex` / `claude` / `api` 读取助手准备的 PNG。它们不在 Python 内启动另一份助手或付费 API。原生生图是否可用、额度如何，取决于当前宿主；只有编程能力时也能走绘图指令路线。
 
-批量报告区分 `needs-concept`、`base-ready`、`check-failed`、`failed`；自动底稿视觉验收为 `pending`。退出码：0 全部底稿就绪，1 存在失败，2 等待效果图。
+批量报告区分 `needs-style-review`、`needs-style-choice`、`needs-concept`、`base-ready`、`check-failed`、`failed`；自动底稿视觉验收为 `pending`。退出码：0 全部底稿就绪，1 存在失败，2 等待风格鉴定、用户选择或效果图。详情见 [批量风格流程](references/batch-style.md)。
+
+风格鉴定由当前助手的视觉能力完成，Python 负责检查单和选择分支。`batch.style.json` 保留已选决定；输入图片更换后会要求重新看图。统一后的结果使用 `<name>.unified.png`，避免误用原风格旧图。面板按钮、打开文件夹和进度动画尚不在本轮功能中。
+
+## 更快地处理与返工
+
+已有效果图时跳过马赛克重建。`batch --only hero potion` 只处理指定素材，并继续使用整批风格检查单；其他输出保持原样，报告的 `selected` 标明本次处理范围。建议返工输出到单独目录，再选择最终稿打包。
+
+`show file.pxg` 默认输出尺寸和色板摘要；局部编辑用 `--box x0,y0,x1,y1`，确实要查看完整网格才加 `--full`。助手按需读取提示文件、先看整体预览再放大问题区域，同一素材的效果图用于所有请求尺寸，通过验收的素材无需反复修改。
 
 完整规程见 [SKILL.md](SKILL.md)，格式见 [SPEC.md](SPEC.md)。`examples/ref/base/` 保留早期输出，便于比较。

@@ -22,8 +22,8 @@ class Grid:
 
     def disc(self, cx, cy, rx, ry, c):
         """Filled ellipse centred at (cx, cy) with radii rx, ry (floats allowed)."""
-        for y in range(self.n):
-            for x in range(self.n):
+        for y in range(max(0, math.floor(cy - abs(ry))), min(self.n, math.ceil(cy + abs(ry)) + 1)):
+            for x in range(max(0, math.floor(cx - abs(rx))), min(self.n, math.ceil(cx + abs(rx)) + 1)):
                 if ((x + 0.5 - cx) / rx) ** 2 + ((y + 0.5 - cy) / ry) ** 2 <= 1.0:
                     self.g[y][x] = c
 

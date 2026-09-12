@@ -13,9 +13,11 @@
     picxel.py concept <ref.pre.png> --anchor anchor.json [--provider codex --result concept.png]
                                                    consume an assistant-produced concept, or use the mosaic with none
     picxel.py derive <big.pxg> --sizes 64,32          refine once at 128, majority-vote downsample the rest
-    picxel.py show   <file.pxg> [--box x0,y0,x1,y1]   ASCII window of just the area you are editing
+    picxel.py show   <file.pxg> [--box x0,y0,x1,y1 | --full]   compact summary, explicit crop or full grid
+    picxel.py face   <file.pxg> --anchor ref.anchor.json --patch face.json
+                                                   optional, local facial repair; --prompt-only prepares visual review
     picxel.py smooth <file.pxg>... [--passes N] [--keep SYMS]   merge specks in place
-    picxel.py batch  <DIR> [-o OUT] [--provider P] [--sizes 64,32]
+    picxel.py batch  <DIR> [-o OUT] [--provider P] [--sizes 64,32] [--only NAME ...]
                                                    every <name>.anchor.json + image in DIR -> base sheets + batch-report.json
 
 Only Pillow is required. Sizes are fixed at 32, 64, 128.
@@ -29,11 +31,12 @@ import io
 import json
 import sys
 import math
+import hashlib
 from html import escape
 from collections import Counter
 from pathlib import Path
 
-from PIL import Image, ImageChops
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 SIZES = (32, 64, 128)
 KINDS = ("tile", "item", "sprite")
@@ -63,69 +66,124 @@ def palette_colors(name: str, base: Path | None) -> list[str] | None:
     raise ValueError(f"unknown palette {name!r} (built-ins: {sorted(PALETTES)}, or a .pal file, or custom)")
 
 
-PALETTE_WEIGHT = {"fine": 8, "medium": 2, "coarse": 1}   # small critical features live in fine regions
-PALETTE_MIN_DIST = 22.0                                   # picks closer than this are the same color
+PALETTE_WEIGHT = {"fine": 8, "medium": 2, "coarse": 1}
+PALETTE_MIN_DIST = 0.02  # Oklab distance; explicit colors and small exact palettes stay intact.
 
 
-def extract_palette(image: Path, count: int, anchor: dict | None = None) -> list[str]:
-    """Reduce an image to `count` colors, most important first.
+def _oklab(rgb: tuple[int, int, int]) -> tuple[float, float, float]:
+    """sRGB to perceptual lightness/a/b. Ottosson's public-domain Oklab matrices:
+    https://bottosson.github.io/posts/oklab/
+    """
+    r, g, b = (v / 255 for v in rgb)
+    r, g, b = (v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4 for v in (r, g, b))
+    l = (0.4122214708*r + 0.5363325363*g + 0.0514459929*b) ** (1/3)
+    m = (0.2119034982*r + 0.6806995451*g + 0.1073969566*b) ** (1/3)
+    s = (0.0883024619*r + 0.2817188376*g + 0.6299787005*b) ** (1/3)
+    return (0.2104542553*l + 0.7936177850*m - 0.0040720468*s,
+            1.9779984951*l - 2.4285922050*m + 0.4505937099*s,
+            0.0259040371*l + 0.7827717662*m - 0.8086757660*s)
 
-    Three rules, each learned from a real failure:
-    - with an anchor, pixels in `fine` regions weigh 8x and `medium` 2x, so a tongue or an eye
-      survives median cut even when it is a few dozen pixels;
-    - near-duplicate picks (distance < PALETTE_MIN_DIST) are merged, so five almost-equal
-      dark grays cannot hog the 16 slots;
-    - the darkest and lightest opaque colors are always kept -- outline and highlight need them."""
+
+def _palette_from_image(img: Image.Image, count: int, anchor: dict | None = None) -> list[str]:
+    """Select actual source colors using coverage, regional importance and perceptual error."""
     if not 2 <= count <= 16:
         raise ValueError("colors must be between 2 and 16")
-    img = Image.open(image).convert("RGBA")
-    img.thumbnail((256, 256), Image.Resampling.NEAREST)
-    w, h = img.size
-    weight_map = None
-    if anchor is not None and anchor.get("regions"):
-        weight_map = [[1] * w for _ in range(h)]
-        for region in anchor["regions"]:
-            x0, y0, x1, y1 = (int(round(region["box"][0] * w)), int(round(region["box"][1] * h)),
-                              int(round(region["box"][2] * w)), int(round(region["box"][3] * h)))
-            wt = PALETTE_WEIGHT[region["detail"]]
-            for y in range(max(0, y0), min(h, y1)):
-                row = weight_map[y]
-                for x in range(max(0, x0), min(w, x1)):
-                    row[x] = max(row[x], wt)
-    data = img.get_flattened_data() if hasattr(img, "get_flattened_data") else img.getdata()
-    opaque: list[tuple[int, int, int]] = []
-    for i, (r, g, b, a) in enumerate(data):
-        if a < 128:
-            continue
-        n = 1 if weight_map is None else weight_map[i // w][i % w]
-        opaque.extend(((r, g, b),) * n)
-    if not opaque:
-        raise ValueError("image has no opaque pixels")
-    tiny = Image.new("RGB", (len(opaque), 1))
-    tiny.putdata(opaque)
-    q = tiny.quantize(colors=min(256, count * 4), method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
-    counts = Counter(q.get_flattened_data() if hasattr(q, "get_flattened_data") else q.getdata())
-    pal = q.getpalette()
-    candidates = [tuple(pal[i * 3:i * 3 + 3]) for i, _ in counts.most_common()]
-
-    def dist(a, b):
-        return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2) ** 0.5
-
-    # Reserve both ends before filling the budget; replacing the last slot twice
-    # used to evict the dark outline again when adding the highlight.
-    reserved = (anchor or {}).get("palette", [])
+    anchor = anchor or {}
+    reserved = list(dict.fromkeys(anchor.get("palette", [])))
+    if any(not isinstance(c, str) or not _hex_ok(c) for c in reserved):
+        raise ValueError("anchor palette must contain lowercase #rrggbb colors")
     if len(reserved) > count:
         raise ValueError("anchor palette exceeds requested color count")
     picked = [tuple(int(c[i:i + 2], 16) for i in (1, 3, 5)) for c in reserved]
-    for end in (min(candidates, key=sum), max(candidates, key=sum)):
-        if len(picked) < count and all(dist(end, o) >= PALETTE_MIN_DIST for o in picked):
-            picked.append(end)
-    for c in candidates:                                   # frequency order, near-duplicates merged
-        if len(picked) >= count:
+    w, h = img.size
+    # Full-resolution histograms avoid dropping a small feature at thumbnail grid phases.
+    # Edges contribute less evidence than solid interiors; fully transparent RGB never votes.
+    alpha = img.getchannel("A").point(lambda a: a if a >= 128 else 0)
+    confidence = alpha.filter(ImageFilter.MinFilter(3)).point(lambda a: 255 if a >= 128 else 32)
+    alpha = ImageChops.multiply(alpha, confidence)
+    regions = Image.new("L", img.size, 1)
+    draw = ImageDraw.Draw(regions)
+    for region in anchor.get("regions", []):
+        x0, y0, x1, y1 = (round(v * dim) for v, dim in zip(region["box"], (w, h, w, h)))
+        if x1 > x0 and y1 > y0:
+            draw.rectangle((x0, y0, x1 - 1, y1 - 1), fill=PALETTE_WEIGHT[region["detail"]])
+    hist: Counter = Counter()
+    weighted = img.copy()
+    for weight in sorted(value for _, value in regions.getcolors()):
+        mask = regions.point(lambda v: 255 if v == weight else 0)
+        weighted.putalpha(ImageChops.multiply(alpha, mask))
+        for pixels, (r, g, b, a) in weighted.getcolors(w * h):
+            if a:
+                hist[(r, g, b)] += pixels * a * weight / 255
+    if not hist:
+        raise ValueError("image has no opaque pixels")
+    ordered = sorted(hist, key=lambda c: (-hist[c], c))
+    remaining = [c for c in ordered if c not in picked]
+    if len(picked) + len(remaining) <= count:
+        return ["#%02x%02x%02x" % c for c in picked + remaining]
+    # Group variations perceptually too: an 8-level RGB bin is far too coarse
+    # near black. Representatives remain actual source colors, not averages.
+    labs = {c: _oklab(c) for c in hist}
+    labs.update((c, _oklab(c)) for c in picked)
+
+    def candidates(population):
+        bins = {}
+        for color in sorted(population, key=lambda c: (-population[c], c)):
+            key = tuple(round(v / PALETTE_MIN_DIST) for v in labs[color])
+            if key not in bins:
+                bins[key] = [0.0, color]
+            bins[key][0] += population[color]
+        return {color: mass for mass, color in bins.values()}
+
+    weights = candidates(hist)
+    target = anchor.get("size", SIZES[-1])
+    # Less than a quarter target pixel of weighted support is unreliable noise.
+    support = min(max(weights.values()), sum(hist.values()) / (4 * target * target))
+    weights = {c: mass for c, mass in weights.items() if mass >= support}
+
+    def distance(a, b):
+        return sum((x - y) ** 2 for x, y in zip(labs[a], labs[b]))
+
+    ends = sorted(weights, key=lambda c: (labs[c][0], c))
+    for color in (ends[0], ends[-1]):
+        if len(picked) < count and color not in picked:
+            if not picked or min(distance(color, p) for p in picked) >= PALETTE_MIN_DIST ** 2:
+                picked.append(color)
+    # A designated fine region gets a chance to keep its dominant perceptual
+    # color before large materials spend the remaining slots. Later coarse
+    # regions already removed their overlap from this mask.
+    fine_alpha = ImageChops.multiply(alpha, regions.point(lambda v: 255 if v == PALETTE_WEIGHT["fine"] else 0))
+    weighted.putalpha(fine_alpha)
+    for region in anchor.get("regions", []):
+        if region["detail"] != "fine" or len(picked) >= count:
+            continue
+        box = tuple(round(v * dim) for v, dim in zip(region["box"], (w, h, w, h)))
+        patch = weighted.crop(box)
+        local: Counter = Counter()
+        if patch.width and patch.height:
+            for pixels, (r, g, b, a) in patch.getcolors(patch.width * patch.height):
+                if a:
+                    local[(r, g, b)] += pixels * a
+        if local:
+            options = candidates(local)
+            color = max(options, key=lambda c: (options[c], c))
+            if min(distance(color, p) for p in picked) >= PALETTE_MIN_DIST ** 2:
+                picked.append(color)
+    errors = {c: min(distance(c, p) for p in picked) for c in weights}
+    while len(picked) < count:
+        eligible = [c for c in weights if errors[c] >= PALETTE_MIN_DIST ** 2]
+        if not eligible:
             break
-        if all(dist(c, o) >= PALETTE_MIN_DIST for o in picked):
-            picked.append(c)
+        color = max(eligible, key=lambda c: (weights[c] * errors[c], weights[c], c))
+        picked.append(color)
+        errors = {c: min(error, distance(c, color)) for c, error in errors.items()}
     return ["#%02x%02x%02x" % c for c in picked]
+
+
+def extract_palette(image: Path, count: int, anchor: dict | None = None) -> list[str]:
+    """Read a concept and select up to count precise colors, with optional anchor priorities."""
+    with Image.open(image) as img:
+        return _palette_from_image(img.convert("RGBA"), count, anchor)
 SEAM_WARN = 40.0      # mean RGB distance across a tile edge
 ORPHAN_WARN = 3       # pixels with no same-color neighbor (8-way) per sheet
 
@@ -384,17 +442,7 @@ def import_png(src: Path, size: int, name: str | None, kind: str, palette: str, 
         w, h = img.size
     master = palette_colors(palette, src.parent)
     if master is None:
-        # Use the prepared alpha mask, not the background colors in the source.
-        sample = img.copy()
-        sample.thumbnail((256, 256), Image.Resampling.NEAREST)
-        opaque = [sample.getpixel((x, y))[:3] for y in range(sample.height) for x in range(sample.width)
-                  if sample.getpixel((x, y))[3] >= 128]
-        if not opaque:
-            raise ValueError("image has no opaque pixels")
-        tiny = Image.new("RGB", (len(opaque), 1))
-        tiny.putdata(opaque)
-        q = tiny.quantize(colors=colors, dither=Image.Dither.NONE).convert("RGB")
-        master = list(dict.fromkeys("#%02x%02x%02x" % q.getpixel((x, 0)) for x in range(q.width)))
+        master = _palette_from_image(img, colors)
     if not master or len(master) > 256 or any(not _hex_ok(c) for c in master):
         raise ValueError("palette must contain valid #rrggbb colors")
     # Quantize BEFORE voting: a hundred close skin tones must beat one exact
@@ -416,13 +464,27 @@ def import_png(src: Path, size: int, name: str | None, kind: str, palette: str, 
     for gy in range(size):
         row: list[tuple[int, int, int] | None] = []
         for gx in range(size):
+            if block == 1:
+                r, g, b, a = px[gx, gy]
+                row.append(None if a < 128 else (r, g, b))
+                continue
+            patch = img.crop((gx * block, gy * block, (gx + 1) * block, (gy + 1) * block))
             votes: Counter = Counter()
-            for y in range(gy * block, (gy + 1) * block):
-                for x in range(gx * block, (gx + 1) * block):
-                    r, g, b, a = px[x, y]
-                    votes[None if a < 128 else (r, g, b)] += 1
+            for amount, (r, g, b, a) in patch.getcolors(block * block):
+                votes[None if a < 128 else (r, g, b)] += amount
             transparent = votes.pop(None, 0)
-            row.append(None if transparent >= block * block / 2 else votes.most_common(1)[0][0])
+            if transparent >= block * block / 2:
+                row.append(None)
+                continue
+            maximum = max(votes.values())
+            winners = {color for color, amount in votes.items() if amount == maximum}
+            if len(winners) == 1:
+                row.append(next(iter(winners)))
+            else:
+                # Preserve the original row-major tiebreak; histogram order is not pixel order.
+                row.append(next(px[x, y][:3] for y in range(gy * block, (gy + 1) * block)
+                                for x in range(gx * block, (gx + 1) * block)
+                                if px[x, y][3] >= 128 and px[x, y][:3] in winners))
         cells.append(row)
     # Encode palette colors as symbols, keeping the output within 16 colors.
     mapped = {c: "#%02x%02x%02x" % c for row in cells for c in row if c is not None}
@@ -480,6 +542,25 @@ def load_anchor(path: Path) -> dict:
             problems.append(f"regions[{i}].box must be [x0, y0, x1, y1] in 0..1 with x0<x1, y0<y1")
         if region.get("detail") not in DETAIL_DIVISOR:
             problems.append(f"regions[{i}].detail must be one of {sorted(DETAIL_DIVISOR)}")
+    faces = data.get("faces", [])
+    if not isinstance(faces, list):
+        problems.append("faces must be a list")
+        faces = []
+    for i, face in enumerate(faces):
+        if not isinstance(face, dict):
+            problems.append(f"faces[{i}] must be an object")
+            continue
+        box = face.get("box")
+        if not (isinstance(box, list) and len(box) == 4 and
+                all(isinstance(v, (int, float)) and 0 <= v <= 1 for v in box) and box[0] < box[2] and box[1] < box[3]):
+            problems.append(f"faces[{i}].box must bound the source face in 0..1")
+        if type(face.get("complex")) is not bool:
+            problems.append(f"faces[{i}].complex must be true or false")
+        for field in ("expression", "reason"):
+            if not isinstance(face.get(field), str) or not face[field].strip():
+                problems.append(f"faces[{i}].{field} must be nonempty text")
+        if face.get("complex") is True and (not isinstance(face.get("gaze"), str) or not face["gaze"].strip()):
+            problems.append(f"faces[{i}].gaze must describe the original gaze before eye repair")
     if problems:
         raise ValueError("anchor.json: " + "; ".join(problems))
     return data
@@ -525,17 +606,30 @@ def concept(pre: Path, anchor: dict, provider: str, out: Path, result: Path | No
     return out
 
 
-def concept_prompt(anchor: dict) -> str:
+def concept_prompt(anchor: dict, style: dict | None = None, mode: str = "original") -> str:
     framing = ("Opaque square tile, matching opposite edges, no border or centered emblem."
                if anchor["kind"] == "tile" else
                "Single isolated subject on true transparency, entire silhouette visible with a small empty margin.")
-    return (f"Game pixel-art concept: {anchor.get('subject', '')}. Target {anchor['size']}x{anchor['size']} logical pixels. "
-            "Redesign details at that resolution; use large connected flat color clusters, 2-3 shade steps per material, "
-            "one consistent pixel grid, top-left light, crisp stepped edges. No gradients, antialiasing, texture noise, "
-            "dithering, floating decorations, text or watermark. Preserve reference pose and proportions. "
+    prompt = (f"Game pixel art: {anchor.get('subject', '')}. Target {anchor['size']}x{anchor['size']} logical pixels. "
+            "Resolution-appropriate details; connected flat clusters, 2-3 shades/material, one pixel grid, "
+            "top-left light, crisp stepped edges. No gradients, antialiasing, texture noise, dithering, decorations, text or watermark. "
+            "Preserve source pose and proportions. "
             f"{framing} Keep: {'; '.join(anchor['keep'])}. Omit: {'; '.join(anchor.get('drop', []))}. "
             f"Palette: {', '.join(anchor.get('palette', anchor.get('colors', [])))}; at most 12-16 colors. "
-            "Read the original reference as well as the mosaic: restore identifying features the mosaic lost.")
+            "Use the original for identity; restore identifying features lost in the mosaic.")
+    if style is None or mode == "original":
+        return prompt
+    instruction = ("Restyle this outlier to match the batch rendering style. The source supplies subject content, "
+                   "not the rendering style. " if mode == "unify" else
+                   "Keep this compatible asset consistent with the shared batch rendering style. ")
+    references = (f"Style reference assets: {', '.join(style['references'])}. "
+                  "Use their approved concept images as style references, keeping the original image as the content reference. "
+                  if style["references"] else "Establish the batch's baseline concept using the shared style and this source. ")
+    return (prompt + "\n\n" + instruction + f"Shared style: {style['profile']} "
+            + references +
+            "Match outline treatment, shading, material rendering, texture density and palette treatment. "
+            "Preserve the source identity, pose, silhouette and all required keep features, including identifying colors. "
+            "Do not copy another asset's subject, costume, anatomy or background. Style consistency does not mean identical hues.")
 
 
 def smooth_sheet(sheet: Sheet, passes: int, keep: str) -> int:
@@ -565,11 +659,165 @@ def smooth_sheet(sheet: Sheet, passes: int, keep: str) -> int:
     return changed
 
 
+def face_prompt(anchor: dict, size: int) -> str:
+    faces = [(i, face) for i, face in enumerate(anchor.get("faces", [])) if face["complex"]]
+    if not faces:
+        return "No complex visible face annotated; preserve the existing pixels."
+    notes = " ".join(f"Face {i}: {f['expression']}. Original gaze: {f['gaze']}. Risk: {f['reason']}. Source box: {f['box']}." for i, f in faces)
+    return (f"Inspect the {size}x{size} pixel sheet beside the original reference. {notes} "
+            "If eyes and mouth are already readable, preserve them. Otherwise repair only the eyes or mouth. "
+            "First inspect the high-resolution ORIGINAL, not just the generated concept: record pupil position, "
+            "which side shows sclera, eyelid openness, and whether the gaze is down, up or sideways. "
+            "Preserving this gaze takes priority over increasing contrast. Never mirror pupil/sclera placement "
+            "or shift pupils upward merely to make them clearer. If gaze is uncertain, preserve the original pixels. "
+            "Preserve existing eyebrows, nose, hair, face shading and eye contours. Do not add or redraw eyebrows. "
+            "Give visible open eyes a small amount of light sclera on the correct side "
+            "and dark pupils when appropriate; for animal eyes use species-appropriate pupils and catchlights. "
+            "Preserve intentional closed eyes, profile views, occlusion and expression; never force two wide-open human eyes. "
+            "Clarify mouth pixels only when needed, preserving the original mouth shape and expression. "
+            "Keep head tilt, identity and batch style. "
+            "Locate the face again on this final grid: source boxes are not pixel-sheet coordinates. "
+            "Use existing palette colors; a free symbol may expose an unused approved light/dark color. "
+            "Write a face patch with source, size, optional colors, patches [{face, feature, box, rows, eyes}]. "
+            "feature must be eye or mouth. Use tight, separately inspected eye/mouth boxes, never a full-face patch. "
+            "Boxes are inclusive pixel coordinates; eyes optionally list {box, light, dark} for open-eye contrast checks. "
+            "Inspect at native size and 4x after applying; do not smooth or outline over the repaired details. "
+            "If the face is too small or lacks usable light/dark colors, report the limitation instead of inventing detail.")
+
+
+def face_patch(sheet: Sheet, anchor: dict, plan: dict) -> Sheet:
+    """Apply assistant-authored facial pixels; no face detector or generic eye template."""
+    errors, _ = check(sheet)
+    if errors:
+        raise ValueError("invalid source sheet: " + "; ".join(errors))
+    if not isinstance(plan, dict) or plan.get("source") != sheet.name or plan.get("size") != sheet.size:
+        raise ValueError("face patch source/size does not match the sheet")
+    patches = plan.get("patches")
+    if not isinstance(patches, list) or not patches:
+        raise ValueError("face patch needs a nonempty patches list")
+    grid = [list(row) for row in sheet.rows]
+    additions = plan.get("colors", {})
+    if not isinstance(additions, dict) or any(k not in SYMBOLS or len(k) != 1 or not isinstance(v, str) or not _hex_ok(v)
+                                            for k, v in additions.items()):
+        raise ValueError("face colors must use A-P and lowercase #rrggbb")
+    if any(k in sheet.colors and sheet.colors[k] != v for k, v in additions.items()):
+        raise ValueError("face patch cannot redefine existing colors outside the face")
+    colors = dict(sheet.colors, **additions)
+    faces = anchor.get("faces", [])
+    touched = set()
+
+    def pixel_box(box):
+        if not (isinstance(box, list) and len(box) == 4 and all(type(v) is int for v in box) and
+                0 <= box[0] <= box[2] < sheet.size and 0 <= box[1] <= box[3] < sheet.size):
+            raise ValueError("face patch box must be inclusive pixel coordinates inside the sheet")
+        return box
+
+    for patch in patches:
+        if not isinstance(patch, dict):
+            raise ValueError("each face patch must be an object")
+        if patch.get("feature") not in ("eye", "mouth"):
+            raise ValueError("face patch feature must be eye or mouth; brows, nose and whole-face edits are excluded")
+        face = patch.get("face")
+        if type(face) is not int or not 0 <= face < len(faces) or not faces[face]["complex"]:
+            raise ValueError("face patch must target an annotated complex face; objects and clear faces are preserved")
+        if not isinstance(faces[face].get("gaze"), str) or not faces[face]["gaze"].strip():
+            raise ValueError("face patch requires an assessment of the original gaze")
+        x0, y0, x1, y1 = pixel_box(patch.get("box"))
+        rows = patch.get("rows")
+        if not isinstance(rows, list) or len(rows) != y1 - y0 + 1 or any(not isinstance(r, str) or len(r) != x1 - x0 + 1 for r in rows):
+            raise ValueError("face patch rows must exactly fill its box")
+        for dy, row in enumerate(rows):
+            for dx, symbol in enumerate(row):
+                x, y = x0 + dx, y0 + dy
+                if (x, y) in touched:
+                    raise ValueError("face patches must not overlap")
+                touched.add((x, y))
+                if symbol != TRANSPARENT and symbol not in colors:
+                    raise ValueError("face patch must use the existing palette symbols")
+                if (symbol == TRANSPARENT) != (sheet.rows[y][x] == TRANSPARENT):
+                    raise ValueError("face patch must preserve the source alpha silhouette")
+                grid[y][x] = symbol
+        eyes = patch.get("eyes", [])
+        if not isinstance(eyes, list) or any(not isinstance(eye, dict) for eye in eyes):
+            raise ValueError("eyes must list open-eye check objects")
+        if patch["feature"] == "mouth" and eyes:
+            raise ValueError("mouth patches cannot include eye edits")
+        eye_pixels = set()
+        for eye in eyes:
+            ex0, ey0, ex1, ey1 = pixel_box(eye.get("box"))
+            if not (x0 <= ex0 <= ex1 <= x1 and y0 <= ey0 <= ey1 <= y1):
+                raise ValueError("eye check must stay inside its face patch")
+            eye_pixels.update((x, y) for y in range(ey0, ey1 + 1) for x in range(ex0, ex1 + 1))
+            light, dark = eye.get("light"), eye.get("dark")
+            if light not in colors or dark not in colors:
+                raise ValueError("eye check needs existing light/dark palette symbols")
+            lightness = [_oklab(tuple(int(colors[c][i:i+2], 16) for i in (1, 3, 5)))[0] for c in (light, dark)]
+            visible = {grid[y][x] for y in range(ey0, ey1 + 1) for x in range(ex0, ex1 + 1)}
+            if lightness[0] - lightness[1] < 0.3 or light not in visible or dark not in visible:
+                raise ValueError("open eye needs visible, distinct light and dark pixels")
+        if eyes and any(grid[y][x] != sheet.rows[y][x] and (x, y) not in eye_pixels
+                        for y in range(y0, y1 + 1) for x in range(x0, x1 + 1)):
+            raise ValueError("eye patch changes pixels outside the declared eye regions")
+    name = sheet.name + "-face"
+    result = Sheet(name, sheet.size, sheet.kind, sheet.palette, colors, ["".join(r) for r in grid],
+                   sheet.path.with_name(name + ".pxg") if sheet.path else None)
+    errors, _ = check(result)
+    if errors:
+        raise ValueError("invalid face result: " + "; ".join(errors))
+    return result
+
+
 REF_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp")
 
 
+def batch_style(src_dir: Path, images: dict[str, Path]) -> tuple[dict | None, str]:
+    """The assistant judges style; this file binds its review/choices to the actual images."""
+    if len(images) < 2:
+        return None, ""
+    path = src_dir / "batch.style.json"
+    inputs = {name: {"file": image.name, "sha256": hashlib.sha256(image.read_bytes()).hexdigest()}
+              for name, image in images.items()}
+    if not path.exists():
+        draft = {"profile": "", "references": [], "assets": {
+            name: dict(source, match=None, reason="", choice=None) for name, source in inputs.items()}}
+        path.write_text(json.dumps(draft, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        return None, "Visually review the batch and complete batch.style.json; Python does not classify art style."
+    review = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(review, dict) or not isinstance(review.get("assets"), dict):
+        raise ValueError("batch.style.json must contain an assets object")
+    if set(review["assets"]) != set(inputs):
+        return None, "Batch membership changed; visually review the new batch and update batch.style.json."
+    for name, source in inputs.items():
+        item = review["assets"][name]
+        if not isinstance(item, dict):
+            raise ValueError(f"batch.style.json: {name} must be an object")
+        if any(item.get(k) != v for k, v in source.items()):
+            return None, f"Reference image {name} changed; review it before updating its file/sha256 in batch.style.json."
+        if item.get("match") is None:
+            return None, f"Style review for {name} is incomplete in batch.style.json."
+        if type(item["match"]) is not bool:
+            raise ValueError(f"batch.style.json: {name}.match must be true, false or null")
+        if not isinstance(item.get("reason"), str) or not item["reason"].strip():
+            raise ValueError(f"batch.style.json: {name}.reason must explain the visual assessment")
+        if item.get("choice") not in (None, "original", "unify"):
+            raise ValueError(f"batch.style.json: {name}.choice must be null, original or unify")
+        if item["match"] and item.get("choice") is not None:
+            raise ValueError(f"batch.style.json: compatible asset {name} needs no user choice")
+    profile, references = review.get("profile"), review.get("references")
+    if not isinstance(profile, str) or not isinstance(references, list):
+        raise ValueError("batch.style.json: profile must be text and references must be asset names")
+    if any(not isinstance(name, str) or name not in inputs for name in references):
+        raise ValueError("batch.style.json: references must name assets in this batch")
+    if any(not review["assets"][name]["match"] for name in references):
+        raise ValueError("batch.style.json: style references must be compatible baseline assets")
+    if any(item["match"] or item.get("choice") == "unify" for item in review["assets"].values()):
+        if not profile.strip() or not references:
+            return None, "Choose a baseline style and reference assets before generating a unified batch."
+    return review, ""
+
+
 def batch(src_dir: Path, out_dir: Path, provider: str, sizes: list[int] | None, concept_dir: Path | None = None,
-          concept_background: str = "auto") -> int:
+          concept_background: str = "auto", only: list[str] | None = None) -> int:
     """One directory = one batch. Every <name>.anchor.json + sibling image becomes a base sheet
     (mosaic -> concept -> palette -> import -> smooth -> check -> render). The model-side
     erase-and-paint pass happens afterwards, per sheet, in queue or parallel mode -- never here."""
@@ -577,10 +825,22 @@ def batch(src_dir: Path, out_dir: Path, provider: str, sizes: list[int] | None, 
     if not anchors:
         print(f"no *.anchor.json in {src_dir}")
         return 1
+    available = {p.name[:-len(".anchor.json")] for p in anchors}
+    if only is not None and (not only or set(only) - available):
+        raise ValueError("--only must name existing assets: " + ", ".join(sorted(available)))
     out_dir.mkdir(parents=True, exist_ok=True)
+    images = {}
+    for apath in anchors:
+        stem = apath.name[:-len(".anchor.json")]
+        image = next((apath.with_name(stem + ext) for ext in REF_SUFFIXES if apath.with_name(stem + ext).exists()), None)
+        if image is not None:
+            images[stem] = image
+    style, style_problem = batch_style(src_dir, images)
     jobs, failed = [], 0
     for apath in anchors:
         stem = apath.name[:-len(".anchor.json")]
+        if only is not None and stem not in only:
+            continue
         job = {"name": stem, "anchor": apath.name, "status": "base-ready", "sheets": [], "problems": [],
                "review": "pending"}
         jobs.append(job)
@@ -588,17 +848,45 @@ def batch(src_dir: Path, out_dir: Path, provider: str, sizes: list[int] | None, 
             anchor = load_anchor(apath)
             if sizes:
                 anchor = dict(anchor, size=max(sizes))
-            image = next((apath.with_name(stem + ext) for ext in REF_SUFFIXES if apath.with_name(stem + ext).exists()), None)
+            image = images.get(stem)
             if image is None:
                 raise FileNotFoundError(f"no reference image {stem}.png/.jpg next to the anchor")
-            pre = mosaic(image, anchor, out_dir / f"{stem}.pre.png")
+            if style_problem:
+                job["status"] = "needs-style-review"
+                job["problems"].append(style_problem)
+                continue
+            mode = "original"
+            if style is not None:
+                assessment = style["assets"][stem]
+                mode = "matched" if assessment["match"] else assessment["choice"]
+                job["style"] = {"mode": mode, "reason": assessment["reason"]}
+                if mode is None:
+                    job["status"] = "needs-style-choice"
+                    job["question"] = f"{stem} 与这批素材的画风差异较大：{assessment['reason']}。保留原图风格，还是统一到这批画风？"
+                    job["choices"] = [{"value": "original", "label": "保留原图风格"},
+                                      {"value": "unify", "label": "统一画风"}]
+                    job["problems"].append("Await the user's choice in batch.style.json; do not generate this asset yet.")
+                    continue
+                if mode != "original":
+                    references = style["references"]
+                    # Establish the first baseline before referring to it; avoid
+                    # asking two not-yet-generated baseline concepts to reference each other.
+                    job["style_references"] = references[:references.index(stem)] if stem in references else references
+            pre = out_dir / f"{stem}.pre.png"
             prompt = out_dir / f"{stem}.prompt.txt"
-            prompt.write_text(concept_prompt(anchor), encoding="utf-8")
+            prompt_style = dict(style, references=job.get("style_references", [])) if style is not None else None
+            prompt.write_text(concept_prompt(anchor, prompt_style, mode), encoding="utf-8")
             job["prompt"] = prompt.name
-            result = concept_dir / f"{stem}.png" if concept_dir else None
-            if provider != "none" and (result is None or not result.exists()):
+            concept_name = f"{stem}.unified.png" if mode == "unify" else f"{stem}.png"
+            job["concept_file"] = concept_name
+            needs_concept = provider != "none" or mode == "unify"
+            result = concept_dir / concept_name if concept_dir and needs_concept else None
+            have_concept = result is not None and result.exists()
+            if not needs_concept or not have_concept:
+                mosaic(image, anchor, pre)
+            if needs_concept and not have_concept:
                 job["status"] = "needs-concept"
-                job["problems"].append(f"Generate {stem}.png in a concept directory, then rerun with --concept-dir DIR")
+                job["problems"].append(f"Generate {concept_name} in a concept directory, then rerun with --concept-dir DIR")
                 continue
             con = concept(pre, anchor, provider, out_dir / f"{stem}.concept.png", result, concept_background)
             pal_path = out_dir / f"{stem}.pal"
@@ -619,6 +907,14 @@ def batch(src_dir: Path, out_dir: Path, provider: str, sizes: list[int] | None, 
                     job["problems"] += [f"{size}: {e}" for e in errors]
                 else:
                     render(sheet, out_dir)
+                    if anchor.get("faces"):
+                        complex_face = any(face["complex"] for face in anchor["faces"])
+                        review = {"sheet": spath.name, "status": "needs-face-review" if complex_face else "preserve"}
+                        if complex_face:
+                            fp = out_dir / f"{sheet.name}.face-prompt.txt"
+                            fp.write_text(face_prompt(anchor, size), encoding="utf-8")
+                            review["prompt"] = fp.name
+                        job.setdefault("face_review", []).append(review)
                 job["problems"] += [f"{size}: (warn) {w}" for w in warnings]
                 job["sheets"].append(spath.name)
             if job["status"] == "check-failed":
@@ -628,15 +924,34 @@ def batch(src_dir: Path, out_dir: Path, provider: str, sizes: list[int] | None, 
             job["problems"].append(str(exc))
             failed += 1
     report_path = out_dir / "batch-report.json"
-    report_path.write_text(json.dumps({"provider": provider, "jobs": jobs}, indent=2, ensure_ascii=False), encoding="utf-8")
+    payload = {"provider": provider, "jobs": jobs}
+    if only is not None:
+        payload["selected"] = sorted(set(only))
+    report_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     todo = [j for j in jobs if j["status"] == "base-ready"]
-    print(f"batch: {len(jobs)} jobs, {len(todo)} base sheets ready, {failed} failed -> {report_path}")
+    print(f"batch{' subset' if only is not None else ''}: {len(jobs)} jobs, {len(todo)} base sheets ready, {failed} failed -> {report_path}")
+    if style_problem:
+        print(style_problem)
     for j in jobs:
-        mark = {"base-ready": "+", "needs-concept": "?", "check-failed": "!", "failed": "x"}[j["status"]]
-        print(f"  {mark} {j['name']}: {', '.join(j['sheets']) or j['problems'][0]}")
+        mark = {"base-ready": "+", "needs-style-review": "?", "needs-style-choice": "?",
+                "needs-concept": "?", "check-failed": "!", "failed": "x"}[j["status"]]
+        if j["status"] == "needs-concept":
+            detail = f"prompt={j['prompt']}; save={j['concept_file']}"
+            if j.get("style_references"):
+                detail += "; style refs=" + ",".join(j["style_references"])
+        elif j["status"] == "needs-style-review":
+            detail = "needs-style-review"
+        else:
+            detail = ", ".join(j["sheets"]) or j["problems"][0]
+        print(f"  {mark} {j['name']}: {detail}")
+        if "question" in j:
+            print(f"    {j['question']}")
+        for face in j.get("face_review", []):
+            if face["status"] == "needs-face-review":
+                print(f"    face review: {face['sheet']} -> {face['prompt']}")
     if todo:
         print("next: refine each base sheet against its anchor (erase + paint, <= 20 steps) -- queue or parallel per SKILL.md")
-    return 1 if failed else (2 if any(j["status"] == "needs-concept" for j in jobs) else 0)
+    return 1 if failed else (2 if any(j["status"].startswith("needs-") for j in jobs) else 0)
 
 
 def derive(sheet: Sheet, size: int) -> Sheet:
@@ -771,12 +1086,19 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--keep", default="", help="symbols never merged (eyes, highlights), e.g. BG")
     p = sub.add_parser("derive"); p.add_argument("file", type=Path); p.add_argument("--sizes", required=True, help="comma list, e.g. 64,32")
     p.add_argument("--keep", default="", help="symbols the built-in speck pass must not merge (eyes, held objects)")
-    p = sub.add_parser("show"); p.add_argument("file", type=Path); p.add_argument("--box", help="x0,y0,x1,y1 crop (inclusive); default whole sheet")
+    p = sub.add_parser("show"); p.add_argument("file", type=Path)
+    group = p.add_mutually_exclusive_group()
+    group.add_argument("--box", help="x0,y0,x1,y1 crop (inclusive)")
+    group.add_argument("--full", action="store_true", help="print the full grid; default shows only metadata and palette")
+    p = sub.add_parser("face"); p.add_argument("file", type=Path); p.add_argument("--anchor", type=Path, required=True)
+    group = p.add_mutually_exclusive_group(required=True)
+    group.add_argument("--prompt-only", action="store_true"); group.add_argument("--patch", type=Path)
     p = sub.add_parser("batch"); p.add_argument("dir", type=Path); p.add_argument("-o", "--out", type=Path)
     p.add_argument("--provider", default="none", choices=("none", "codex", "claude", "api"))
     p.add_argument("--concept-dir", type=Path, help="assistant-produced <name>.png concepts; missing results are reported as needs-concept")
     p.add_argument("--concept-background", default="auto", help="concept background: auto | none | key:#rrggbb")
     p.add_argument("--sizes", help="comma list overriding each anchor's size, e.g. 128,64,32")
+    p.add_argument("--only", nargs="+", help="process only these asset names; still use the full batch's style review")
     a = ap.parse_args(argv)
 
     if a.cmd in ("check", "render"):
@@ -846,18 +1168,41 @@ def main(argv: list[str] | None = None) -> int:
         return 1 if failed else 0
     if a.cmd == "show":
         sheet = load(a.file)
+        errors, warnings = check(sheet)
+        if errors:
+            report(sheet, errors, warnings)
+            return 1
+        if not a.box and not a.full:
+            used = Counter(c for row in sheet.rows for c in row if c != TRANSPARENT)
+            print(f"{sheet.name}: {sheet.size}x{sheet.size} {sheet.kind}, {len(used)} colors")
+            print("palette: " + "  ".join(f"{c}={sheet.colors[c]} ({n})" for c, n in used.items()))
+            print("Use --box x0,y0,x1,y1 for an edit window, or --full for all pixels.")
+            return 0
         x0, y0, x1, y1 = (int(v) for v in a.box.split(",")) if a.box else (0, 0, sheet.size - 1, sheet.size - 1)
+        if not (0 <= x0 <= x1 < sheet.size and 0 <= y0 <= y1 < sheet.size):
+            raise ValueError("show box must lie inside the sheet")
         print("   " + "".join(str(x % 10) for x in range(x0, x1 + 1)))
         for y in range(y0, y1 + 1):
             print(f"{y:2} {sheet.rows[y][x0:x1 + 1]}")
         used = sorted({c for y in range(y0, y1 + 1) for c in sheet.rows[y][x0:x1 + 1] if c != TRANSPARENT})
         print("colors here: " + "  ".join(f"{c}={sheet.colors[c]}" for c in used))
         return 0
+    if a.cmd == "face":
+        sheet, anchor = load(a.file), load_anchor(a.anchor)
+        if a.prompt_only:
+            print(face_prompt(anchor, sheet.size))
+            return 0
+        plan = json.loads(a.patch.read_text(encoding="utf-8"))
+        result = face_patch(sheet, anchor, plan)
+        result.path.write_text(result.dump(), encoding="utf-8")
+        render(result, result.path.parent)
+        print(f"face patch -> {result.path}; visually verify expression at native size and 4x")
+        return 0
     if a.cmd == "batch":
         sizes = [int(v) for v in a.sizes.split(",")] if a.sizes else None
         if sizes and any(v not in SIZES for v in sizes):
             print(f"--sizes must come from {SIZES}"); return 2
-        return batch(a.dir, a.out or a.dir / "base", a.provider, sizes, a.concept_dir, a.concept_background)
+        return batch(a.dir, a.out or a.dir / "base", a.provider, sizes, a.concept_dir, a.concept_background, a.only)
     if a.cmd == "smooth":
         failed = 0
         for f in a.files:

@@ -53,3 +53,13 @@ Shade by moving along a ramp, never by mixing in black or white.
 ## `palette: custom`
 
 Used by `import` (colors come from the source PNG) and by users who ship their own palette. Same 16-color cap, no membership check.
+
+## Extracting a reference palette
+
+`palette` and `import --palette custom` share one selector. It counts the full-resolution visible image instead of first shrinking it, so small features are considered. Fully transparent RGB and pixels below the import alpha threshold do not vote; partial coverage and transparency-adjacent pixels carry less weight.
+
+It groups and compares colors in [Oklab](https://bottosson.github.io/posts/oklab/), using perceived lightness for dark/light endpoints. Automatic picks are actual source RGB values, not averages between materials. An image whose exact colors already fit the budget retains those colors, including deliberately close shades.
+
+Priority is explicit hex reservations, supported dark/light colors, representative colors of `fine` regions in anchor order, then colors with the greatest remaining weighted perceptual error. Later region boxes override earlier budgets, matching the anchor convention. Duplicate reserved hex values consume one slot. Reservations are the way to guarantee a specific small color; a `fine` box protects a representative color, not every detail inside it.
+
+When reduction is necessary, very sparse colors below a quarter target pixel of weighted support are excluded from automatic candidates, and near-duplicates do not have to fill every available slot. The target comes from the anchor size, or defaults to 128 for standalone extraction. This reduces fringe contamination but does not change the source alpha mask or semantically identify which object owns a color. Inspect the resulting sprite, especially when thin outlines or highlights are important.

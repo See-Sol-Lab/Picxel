@@ -1,6 +1,6 @@
 # Look, then fix — the critique checklist
 
-Run this against the `@4x` preview after every pass. Fix what fails, re-render, look again. Two passes minimum; do not deliver a sheet you have not looked at.
+Inspect the output at native size and enlarged. Fix failures, then inspect the changed result again. Leave passing assets alone; do not invent edits or repeat identical reviews to meet a cycle count. Do not deliver a sheet you have not looked at.
 
 ## Reads at a glance
 - [ ] At native size and 4× it is obvious what the thing is without the name. Fix the silhouette before touching colors.
