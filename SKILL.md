@@ -27,6 +27,8 @@ The assistant makes visual decisions; Python enforces the grid and exports. Requ
 
 `python scripts/picxel.py panel` opens a local page where the human picks the import folder (or a few images), the export folder, single vs batch (at most 20), sizes, and two batch checkboxes: style review and subagent parallel mode. There is no generate button: the page tells the user to talk to you. The page never drives you; it only writes a job file and watches the export folder.
 
+Single mode shows the source, available concept and pixel output, with an optional 5-second reveal/replay of delivered pixels. This is a presentation animation, not the model's internal stroke history. Save normal outputs as usual; do not add model calls, split drawing into artificial steps, or delay `job done` for the animation. Batch mode keeps the spinner.
+
 1. `job show` prints the job (import, export, files, sizes, style_check, parallel) and, with style_check, each outlier's recorded choice. Take paths and options from it instead of asking again. The user may answer the keep/unify question on the page (it writes `choice` into `batch.style.json`) or in chat; either counts, re-run `job show` before assuming it is still pending.
 2. `job start` right before the first batch/refine step; the page shows one spinner with elapsed time.
 3. Work as usual, writing every final `<name>-<size>.png` / `@4x.png` into the export folder (`batch ... -o <export>`; refined sheets rendered there too). Style review only when `style_check` is true (`batch --style-check`). `parallel` true is the user's explicit permission for subagents; otherwise queue.

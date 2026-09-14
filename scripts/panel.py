@@ -204,7 +204,8 @@ def scan_results(job: dict) -> dict:
             preview, native = export / f"{stem}-{size}@4x.png", export / f"{stem}-{size}.png"
             if preview.exists():
                 shown = native if native.exists() else preview
-                sizes[str(size)] = {"png": image_url(shown.name), "x4": image_url(preview.name)}
+                sizes[str(size)] = {"png": image_url(shown.name), "x4": image_url(preview.name),
+                                    "updated": shown.stat().st_mtime}
         entry = report.get(stem, {})
         problems = entry.get("problems", [])
         warnings = [p.replace("(warn) ", "") for p in problems if "(warn)" in p]
@@ -216,6 +217,7 @@ def scan_results(job: dict) -> dict:
         faces = [f["sheet"] for f in entry.get("face_review", []) if f.get("status") == "needs-face-review"]
         concept = export / f"{stem}.concept.png"
         results[stem] = {"sizes": sizes, "concept": image_url(concept.name) if concept.is_file() else None,
+                         "concept_updated": concept.stat().st_mtime if concept.is_file() else None,
                          "status": status, "missing": missing, "warnings": warnings,
                          "errors": errors, "faces": faces, "style": entry.get("style")}
     return {"results": results, "newest": newest,

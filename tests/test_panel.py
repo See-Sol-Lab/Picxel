@@ -2,6 +2,7 @@
 from pathlib import Path
 import json
 import io
+import os
 import zipfile
 import sys
 import tempfile
@@ -17,6 +18,18 @@ import panel
 
 
 class PanelFiles(unittest.TestCase):
+    def test_result_timestamps_change_after_refinement(self):
+        job = panel.save_job({"import": str(self.src), "export": str(self.dst), "mode": "single", "files": ["a.png"], "sizes": [64]})
+        for name, size in (("a.concept.png", 128), ("a-64.png", 64), ("a-64@4x.png", 256)):
+            Image.new("RGBA", (size, size), "red").save(self.dst / name)
+        before = panel.scan_results(job)["results"]["a"]
+        self.assertEqual(before["concept_updated"], (self.dst / "a.concept.png").stat().st_mtime)
+        changed = before["sizes"]["64"]["updated"] + 10
+        os.utime(self.dst / "a-64.png", (changed, changed))
+        after = panel.scan_results(job)["results"]["a"]
+        self.assertEqual(after["sizes"]["64"]["updated"], changed)
+        self.assertEqual(after["concept_updated"], before["concept_updated"])
+
     def test_finished_folder_contains_only_concepts_and_completed_native_images(self):
         job = panel.save_job({"import": str(self.src), "export": str(self.dst), "mode": "single", "files": ["a.png"], "sizes": [32, 128]})
         Image.new("RGBA", (200, 200), (0, 255, 0, 128)).save(self.dst / "a.concept.png")
