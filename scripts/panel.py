@@ -211,9 +211,8 @@ def scan_results(job: dict) -> dict:
                 sizes[str(size)] = {"png": image_url(native.name), "x4": image_url(preview.name),
                                     "updated": native.stat().st_mtime}
         entry = report.get(stem, {})
-        problems = entry.get("problems", [])
-        warnings = [p.replace("(warn) ", "") for p in problems if "(warn)" in p]
-        errors = [p for p in problems if "(warn)" not in p]
+        # "(warn)" lines are check hints for the assistant (isolated pixels etc.); the page shows only real failures
+        errors = [p for p in entry.get("problems", []) if "(warn)" not in p]
         status = entry.get("status")
         missing = MISSING_REASON.get(status, "AI 还没画到这张") if len(sizes) < len(job["sizes"]) else ""
         if status in ("check-failed", "failed") and errors:
@@ -222,8 +221,7 @@ def scan_results(job: dict) -> dict:
         concept = export / f"{stem}.concept.png"
         results[stem] = {"sizes": sizes, "concept": image_url(concept.name) if current_output(job, concept) else None,
                          "concept_updated": concept.stat().st_mtime if current_output(job, concept) else None,
-                         "status": status, "missing": missing, "warnings": warnings,
-                         "errors": errors, "faces": faces}
+                         "status": status, "missing": missing, "errors": errors, "faces": faces}
     return {"results": results, "newest": newest,
             "done": sum(all(str(n) in results[s]["sizes"] for n in job["sizes"]) for s in stems), "total": len(stems)}
 

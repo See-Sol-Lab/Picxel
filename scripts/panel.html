@@ -58,9 +58,6 @@ button.primary:hover{filter:brightness(1.1)}
 .card.orig img{max-width:100%;max-height:100%;image-rendering:auto}
 .card .miss{color:var(--dim);font-size:12px;text-align:center;line-height:1.5;padding:8px;max-width:160px}
 .card.empty{cursor:default}.card.empty:hover{border-color:var(--line)}
-details.warn{margin-top:8px;font-size:12px;color:var(--dim)}
-details.warn summary{cursor:pointer;color:var(--warn)}
-details.warn li{margin:2px 0}
 /* compare overlay */
 .overlay{position:fixed;inset:0;background:var(--overlay);display:flex;flex-direction:column;z-index:9}
 .overlay .bar{display:flex;gap:12px;align-items:center;padding:14px 20px;flex-wrap:wrap}
@@ -292,7 +289,6 @@ function assetBlock(st,name,r){
           :`<div class="card empty"><div class="t"><span>${sz} × ${sz}</span></div><div class="img"><span class="miss">未生成${r.missing?"<br>"+esc(r.missing):""}</span></div></div>`;
   }
   h+=`</div>`;
-  if(r.warnings&&r.warnings.length)h+=`<details class="warn"><summary>${r.warnings.length} 条校验提示</summary><ul>${r.warnings.map(w=>`<li>${esc(w)}</li>`).join("")}</ul></details>`;
   return h+`</div>`;
 }
 function render(st){

@@ -212,7 +212,8 @@ class PanelFiles(unittest.TestCase):
         Image.new("RGBA", (256, 256)).save(self.dst / "a-64@4x.png")
         r = panel.scan_results(job)["results"]
         self.assertEqual(r["a"]["sizes"]["64"]["png"], "/file?root=export&path=a-64.png")   # native PNG for crisp zoom
-        self.assertEqual(r["a"]["warnings"], ["64: 5 isolated pixels"]); self.assertEqual(r["a"]["faces"], ["a-64.pxg"])
+        self.assertNotIn("warnings", r["a"]); self.assertEqual(r["a"]["errors"], [])      # check hints stay in the report, off the page
+        self.assertEqual(r["a"]["faces"], ["a-64.pxg"])
         self.assertEqual(r["b"]["missing"], "底稿没过校验：64: too many colors")
 
     def test_clear_job_and_missing_export_folder(self):
