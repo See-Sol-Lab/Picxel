@@ -113,12 +113,15 @@ def load_status(export: Path) -> dict:
 
 
 def set_status(export: Path, state: str, note: str = "") -> dict:
-    if state not in ("waiting", "running", "done", "interrupted"):
-        raise ValueError("state must be waiting, running, done or interrupted")
+    if state not in ("waiting", "running", "asking", "done", "interrupted"):
+        raise ValueError("state must be waiting, running, asking, done or interrupted")
     export.mkdir(parents=True, exist_ok=True)
     current = load_status(export)
+    # `asking`: the assistant stopped for a human decision. Resuming with `running` keeps the
+    # original start time, so the elapsed clock covers the whole batch.
+    started = current.get("started") if state == "asking" or (state == "running" and current.get("state") == "asking") else None
     status = {"state": state, "updated": now(), "note": note,
-              "started": now() if state == "running" else current.get("started"),
+              "started": started or (now() if state == "running" else current.get("started")),
               "finished": now() if state in ("done", "interrupted") else None}
     status_path(export).write_text(json.dumps(status, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return status
@@ -227,9 +230,14 @@ def state_payload() -> dict:
     elif status.get("started") and status.get("finished"):
         elapsed = max(0.0, datetime.fromisoformat(status["finished"]).timestamp()
                       - datetime.fromisoformat(status["started"]).timestamp())
+    elif status.get("state") == "asking":
+        elapsed = _seconds_since(status.get("started"))
     stems = [Path(f).stem for f in job["files"]]
     originals = {Path(f).stem: f"/file?root=import&path={f}" for f in job["files"]}
     style = style_questions(Path(job["import"]), stems) if job.get("style_check") else []
+    if status.get("state") == "running" and any(q["choice"] is None for q in style):
+        # The assistant is blocked on the human even if it forgot to say so: no spinner, show the question.
+        status = dict(status, state="asking", looks_stalled=False, note=status.get("note") or "有素材等你选画风")
     return {"job": job, "status": status, "originals": originals, "idle": idle, "elapsed": elapsed,
             "style": style, "import_missing": not Path(job["import"]).is_dir(), **scan}
 
@@ -389,7 +397,7 @@ def job_command(action: str, note: str) -> int:
     if job is None:
         print("no panel job to update")
         return 1
-    state = {"start": "running", "done": "done", "stop": "interrupted"}[action]
+    state = {"start": "running", "ask": "asking", "done": "done", "stop": "interrupted"}[action]
     status = set_status(Path(job["export"]), state, note)
     print(f"job {state}: {job['export']}" + (f" -- {note}" if note else ""))
     return 0

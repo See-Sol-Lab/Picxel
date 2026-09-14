@@ -152,9 +152,10 @@ function refreshSide(){
   $("#styleCheck").disabled=$("#parallel").disabled=ui.mode!=="batch";
   $("#newJob").hidden=!ui.saved;
   const st=last&&last.job?last.status.state:null, h=$("#hint");
-  h.classList.toggle("live",st==="running");
+  h.classList.toggle("live",st==="running"||st==="asking");
   if(!ui.import)h.innerHTML="<b>选好图片和导出位置后</b>请与 AI 对话开始生图";
   else if(st==="running")h.innerHTML="<b>AI 正在画</b>改动这里的设置不会影响正在进行的这批";
+  else if(st==="asking")h.innerHTML="<b>AI 在等你</b>看右边的问题，选好后在对话里说“继续”";
   else if(st==="done"||st==="interrupted")h.innerHTML="<b>这批已结束</b>想再画：点下面「新任务」，或直接换导入位置";
   else h.innerHTML="<b>位置已就绪</b>请与 AI 对话开始生图<br><span style='font-size:12px'>例如：“按面板的设置开始画”</span>";
 }
@@ -236,15 +237,22 @@ function render(st){
     m.innerHTML=html+styleBlock(st)+`<div class="center"><div class="spin"></div><div>AI 正在画 · 已用 ${fmt(st.elapsed)}</div><div>${st.done} / ${st.total} 张已有结果</div>${stall}</div>`;
     const b=$("#stopBtn");if(b)b.onclick=()=>api("/api/stop").then(poll);
     bindStyle();refreshSide();return}
-  // done / interrupted: cards for what exists, honest line for what doesn't
-  const ok=s==="done";
-  html+=`<div class="banner">${ok?`<span class="pill ok">生成成功 ${st.done} / ${st.total}</span>`:`<span class="pill warn">生成中断 · 完成 ${st.done} / ${st.total}</span>`}`;
-  if(st.status.note)html+=`<span class="pill">${esc(st.status.note)}</span>`;
-  if(st.elapsed!=null)html+=`<span class="pill">用时 ${fmt(st.elapsed)}${st.status.finished?" · "+clock(st.status.finished)+" 结束":""}</span>`;
-  html+=`<button id="openBtn">打开导出位置</button></div>`;
-  html+=styleBlock(st);
+  if(s==="asking"){
+    // the assistant stopped for a human decision: no spinner, the question first, then what exists so far
+    html+=`<div class="banner"><span class="pill warn">AI 在等你决定</span>${st.status.note?`<span class="pill">${esc(st.status.note)}</span>`:""}<span class="pill">已用 ${fmt(st.elapsed)} · ${st.done} / ${st.total} 张已有结果</span></div>`;
+    html+=styleBlock(st);
+    html+=`<div class="notice">选好之后回到对话里说一声“继续”，AI 接着画。</div>`;
+  }else{
+    // done / interrupted: cards for what exists, honest line for what doesn't
+    const ok=s==="done";
+    html+=`<div class="banner">${ok?`<span class="pill ok">生成成功 ${st.done} / ${st.total}</span>`:`<span class="pill warn">生成中断 · 完成 ${st.done} / ${st.total}</span>`}`;
+    if(st.status.note)html+=`<span class="pill">${esc(st.status.note)}</span>`;
+    if(st.elapsed!=null)html+=`<span class="pill">用时 ${fmt(st.elapsed)}${st.status.finished?" · "+clock(st.status.finished)+" 结束":""}</span>`;
+    html+=`<button id="openBtn">打开导出位置</button></div>`;
+    html+=styleBlock(st);
+  }
   for(const [name,r] of Object.entries(st.results))html+=assetBlock(st,name,r);
-  m.innerHTML=html;$("#openBtn").onclick=()=>api("/api/open",{which:"export"});bindStyle();
+  m.innerHTML=html;const ob=$("#openBtn");if(ob)ob.onclick=()=>api("/api/open",{which:"export"});bindStyle();
   document.querySelectorAll("[data-open]").forEach(c=>c.onclick=()=>openCompare(c.dataset.open));
   refreshSide();
 }

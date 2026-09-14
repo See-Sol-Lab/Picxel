@@ -95,7 +95,12 @@ class PanelFiles(unittest.TestCase):
         (self.src / panel.STYLE_NAME).write_text(json.dumps(review), encoding="utf-8")
         self.assertEqual(panel.style_questions(self.src, stems), [{"name": "b", "reason": "pastel", "choice": None}])
         self.assertEqual(panel.state_payload()["style"][0]["name"], "b")
+        panel.set_status(self.dst, "running")
+        self.assertEqual(panel.state_payload()["status"]["state"], "asking")    # pending choice while running -> asking
+        started = panel.set_status(self.dst, "asking", "why")["started"]
+        self.assertEqual(panel.set_status(self.dst, "running")["started"], started)  # resuming keeps the clock
         panel.set_style_choice(self.src, "b", "unify")
+        self.assertEqual(panel.state_payload()["status"]["state"], "running")
         self.assertEqual(json.loads((self.src / panel.STYLE_NAME).read_text(encoding="utf-8"))["assets"]["b"]["choice"], "unify")
         for name, choice in (("a", "unify"), ("b", "maybe"), ("zzz", "unify")):
             with self.assertRaises(ValueError):
