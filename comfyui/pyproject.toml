@@ -1,0 +1,14 @@
+[project]
+name = "picxel-comfyui"
+description = "Pipe images from a ComfyUI graph into the Picxel pixel-art panel, and read the finished sprites back."
+version = "0.1.0"
+license = { text = "MIT" }
+dependencies = ["Pillow"]
+
+[project.urls]
+Repository = "https://github.com/See-Sol-Lab/Picxel"
+
+[tool.comfy]
+PublisherId = "see-sol-lab"
+DisplayName = "Picxel"
+Icon = ""

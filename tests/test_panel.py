@@ -1,9 +1,7 @@
 """The panel's job/status files and result scan -- no server, no dialogs."""
 from pathlib import Path
 import json
-import io
 import os
-import zipfile
 import sys
 import tempfile
 import unittest
@@ -117,9 +115,6 @@ class PanelFiles(unittest.TestCase):
         self.assertEqual((folder / "a-效果图.png").read_bytes(), (self.dst / "a.concept.png").read_bytes())
         self.assertTrue((self.dst / "a.prompt.txt").exists())
         self.assertTrue((self.dst / "a.pre.png").exists())
-        with zipfile.ZipFile(io.BytesIO(panel.download_images(job))) as archive:
-            self.assertEqual(archive.namelist(), ["a-效果图.png", "a-128.png"])
-            self.assertEqual(archive.read("a-效果图.png"), (self.dst / "a.concept.png").read_bytes())
 
     def test_done_automatically_collects_deliverables(self):
         panel.save_job({"import": str(self.src), "export": str(self.dst), "mode": "single", "files": ["a.png"], "sizes": [64]})

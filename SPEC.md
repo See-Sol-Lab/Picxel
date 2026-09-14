@@ -51,7 +51,11 @@ Python 不调用对话工具，也不启动 Codex / Claude 子进程。
 
 任务写入 `~/.picxel/current-job.json`；`job show / start / ask / done / stop --note` 管理状态。`asking` 用于等待用户在对话中澄清，恢复时保留起始时刻。新任务的无产物等待时间不早于本次开始时刻，不沿用旧 PNG 的时间。批量生成时转圈；单张显示原图、效果图与已有像素成品，提供约 5 秒的色块显现演示，可跳过和重播，不代表模型内部落笔顺序，不影响生成与导出。
 
-完成或中断后展示真实产物、缺失原因、校验提示和面部复核状态。卡片等大正方形，顺序为效果图、128、64、32，对比层支持 1/2/4/8 倍。支持单张下载、当前任务图片 ZIP 和成品文件夹；`job done` 将效果图及原尺寸 PNG 整理到「成品图」。`/api/clear` 清空任务设置，保留图片；导出目录不存在时直接提示。
+完成或中断后展示真实产物、缺失原因、校验提示和面部复核状态。卡片等大正方形，顺序为效果图、128、64、32，对比层支持 1/2/4/8 倍。不提供下载（产物都在本机），「打开成品图」打开成品文件夹；`job done` 将效果图及原尺寸 PNG 整理到「成品图」。`/api/clear` 清空任务设置，保留图片；导出目录不存在时直接提示。
+
+## ComfyUI 节点
+
+`comfyui/` 提供 `PicxelExport` 与 `PicxelLoad` 两个节点（`NODE_CLASS_MAPPINGS`），只依赖 Pillow。导出节点把 IMAGE 批（≤20）按 `<前缀>.png` / `<前缀>-NN.png` 存为 RGBA（MASK 取反为 alpha），写 `~/.picxel/current-job.json`（字段与 `save_job` 一致：import / export=`<folder>/picxel-out` / mode / files / sizes / created）并在导出目录写 `waiting` 状态；当前任务为 `running` / `asking` 时拒绝。载入节点按尺寸读 `<stem>-<size>.png`，优先「成品图」目录，返回 IMAGE、MASK（1 = 透明）和文件名。节点不 import `picxel.py`，不执行任何像素化步骤。
 
 ## 批量与验收
 

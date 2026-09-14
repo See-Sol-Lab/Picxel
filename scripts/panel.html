@@ -49,7 +49,7 @@ button.primary:hover{filter:brightness(1.1)}
 .strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;max-width:1200px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px;cursor:pointer;display:flex;flex-direction:column;min-width:0;aspect-ratio:1;overflow:hidden}
 .card:hover{border-color:var(--accent)}
-.card .t{font-size:12px;color:var(--dim);margin-bottom:8px;display:flex;justify-content:space-between;gap:6px;align-items:center}.card .t span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.download{font-size:11px;color:#b9b0ff;text-decoration:none;flex:none}.download:hover{text-decoration:underline}.button-link{display:inline-block;background:var(--btn);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:9px 14px;text-decoration:none}.original-link{font-size:12px;color:var(--dim)}
+.card .t{font-size:12px;color:var(--dim);margin-bottom:8px;display:flex;justify-content:space-between;gap:6px;align-items:center}.card .t span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.button-link{display:inline-block;background:var(--btn);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:9px 14px;text-decoration:none}.original-link{font-size:12px;color:var(--dim)}
 .card .img{flex:1;display:flex;align-items:center;justify-content:center;border-radius:8px;overflow:hidden;min-height:0;padding:6px;
   background:linear-gradient(45deg,var(--check1) 25%,transparent 25%,transparent 75%,var(--check1) 75%),linear-gradient(45deg,var(--check1) 25%,transparent 25%,transparent 75%,var(--check1) 75%);
   background-size:16px 16px;background-position:0 0,8px 8px;background-color:var(--check2)}
@@ -94,8 +94,8 @@ kbd{font:11px/1 ui-monospace,monospace;color:var(--dim);border:1px solid var(--l
 </style>
 <body>
 <aside>
-  <h1>Picxel <small id="ver">像素素材面板</small></h1>
-  <div class="sub">你选位置，AI 在对话里画，这里看结果。</div>
+  <h1>Picxel <small id="ver">可视化面板</small></h1>
+  <div class="sub">批量生成你的像素画游戏素材</div>
 
   <div>
     <div class="step">第一步 · 选图</div>
@@ -201,7 +201,6 @@ $("#newJob").onclick=async()=>{
 function fmt(sec){sec=Math.floor(sec||0);return sec<60?`${sec} 秒`:sec<3600?`${Math.floor(sec/60)} 分 ${sec%60} 秒`:`${Math.floor(sec/3600)} 时 ${Math.floor(sec%3600/60)} 分`}
 function clock(iso){if(!iso)return"";const d=new Date(iso);return d.toLocaleTimeString("zh-CN",{hour:"2-digit",minute:"2-digit"})}
 const orderedSizes=st=>[...st.job.sizes].sort((a,b)=>b-a);
-const downloadLink=url=>`<a class="download" href="${esc(url)}&amp;download=1" download>下载</a>`;
 
 // Single-image presentation uses delivered pixels, never invented model strokes.
 let single=null;
@@ -223,7 +222,7 @@ function mountSingle(st){
       <figure><figcaption>效果图</figcaption><div class="surface"><img class="concept" alt="已生成效果图" hidden><span class="empty-note">效果图就绪后显示在这里</span></div></figure>
       <figure class="pixel-view"><figcaption class="pixel-caption">像素成品</figcaption><div class="surface"><canvas hidden aria-label="像素成品的色块显现演示"></canvas><span class="empty-note">等待像素成品</span></div></figure></div>
       <div class="row controls"><button class="replay" disabled>重播绘制演示</button><button class="skip" disabled>直接看成品</button><span class="play-state" role="status"></span></div>
-      <p class="disclosure">色块显现演示，非模型内部落笔记录。成品就绪即可下载，后续修画会更新画面。</p>`;
+      <p class="disclosure">色块显现演示，非模型内部落笔记录。成品在导出文件夹里，后续修画会更新画面。</p>`;
     single={key,node,frame:0,version:"",image:null};
     node.querySelector(".source").src=st.originals[name];
     node.querySelector(".replay").onclick=()=>playSingle(single);
@@ -249,7 +248,7 @@ function mountSingle(st){
     el(".replay").disabled=el(".skip").disabled=false;
     if(first&&current.live)playSingle(current);else finishSingle(current);
   };
-  img.onerror=()=>{if(single===current&&current.version===version)el(".play-state").textContent="预览加载失败，可用下方链接下载成品"};
+  img.onerror=()=>{if(single===current&&current.version===version)el(".play-state").textContent="预览加载失败，成品在导出文件夹里"};
   img.src=version;
 }
 function finishSingle(current){
@@ -285,11 +284,11 @@ function assetBlock(st,name,r){
   if(r.faces&&r.faces.length)tags.push(`<span class="tag warn">面部待修 · ${r.faces.length}</span>`);
   if(r.errors&&r.errors.length)tags.push(`<span class="tag bad">底稿失败</span>`);
   let h=`<div class="asset"><div class="head"><span class="name">${esc(name)}</span>${tags.join("")}<a class="original-link" href="${esc(st.originals[name])}" target="_blank" rel="noopener">查看原图</a></div><div class="strip">`;
-  h+=r.concept?`<div class="card orig" data-open="${esc(name)}"><div class="t"><span>效果图</span>${downloadLink(r.concept)}</div><div class="img"><img src="${esc(r.concept)}" alt="${esc(name)} 效果图"></div></div>`
+  h+=r.concept?`<div class="card orig" data-open="${esc(name)}"><div class="t"><span>效果图</span></div><div class="img"><img src="${esc(r.concept)}" alt="${esc(name)} 效果图"></div></div>`
               :`<div class="card empty"><div class="t"><span>效果图</span></div><div class="img"><span class="miss">未生成效果图</span></div></div>`;
   for(const sz of orderedSizes(st)){
     const got=r.sizes[sz];
-    h+=got?`<div class="card" data-open="${esc(name)}"><div class="t"><span>${sz} × ${sz}</span>${downloadLink(got.png)}</div><div class="img"><img src="${esc(got.png)}&amp;t=${encodeURIComponent(st.status.updated||"")}" alt="${esc(name)} ${sz}像素"></div></div>`
+    h+=got?`<div class="card" data-open="${esc(name)}"><div class="t"><span>${sz} × ${sz}</span></div><div class="img"><img src="${esc(got.png)}&amp;t=${encodeURIComponent(st.status.updated||"")}" alt="${esc(name)} ${sz}像素"></div></div>`
           :`<div class="card empty"><div class="t"><span>${sz} × ${sz}</span></div><div class="img"><span class="miss">未生成${r.missing?"<br>"+esc(r.missing):""}</span></div></div>`;
   }
   h+=`</div>`;
@@ -328,7 +327,7 @@ function render(st){
     html+=`<div class="banner">${ok?`<span class="pill ok">生成成功 ${st.done} / ${st.total}</span>`:`<span class="pill warn">生成中断 · 完成 ${st.done} / ${st.total}</span>`}`;
     if(st.status.note)html+=`<span class="pill">${esc(st.status.note)}</span>`;
     if(st.elapsed!=null)html+=`<span class="pill">用时 ${fmt(st.elapsed)}${st.status.finished?" · "+clock(st.status.finished)+" 结束":""}</span>`;
-    html+=`<button id="openBtn">打开成品图</button><a class="button-link" href="/api/download" download>下载全部图片</a></div>`;
+    html+=`<button id="openBtn">打开成品图</button></div>`;
   }
   if(st.job.mode==="single")html+=`<div id="singleHost"></div>`;
   for(const [name,r] of Object.entries(st.results))html+=assetBlock(st,name,r);
@@ -345,10 +344,10 @@ function drawCompare(){
   const st=last;if(!st||!view.asset||!st.results[view.asset]){closeCompare();return}
   const names=Object.keys(st.results), i=names.indexOf(view.asset), r=st.results[view.asset];
   let o=$(".overlay");if(!o){o=document.createElement("div");o.className="overlay";document.body.appendChild(o);o.onclick=e=>{if(e.target===o)closeCompare()}}
-  let items=r.concept?`<div class="item orig"><div class="box"><img src="${esc(r.concept)}" alt="效果图"></div><div class="cap">效果图 · ${downloadLink(r.concept)}</div></div>`:`<div class="item"><div class="cap">效果图未生成</div></div>`;
+  let items=r.concept?`<div class="item orig"><div class="box"><img src="${esc(r.concept)}" alt="效果图"></div><div class="cap">效果图</div></div>`:`<div class="item"><div class="cap">效果图未生成</div></div>`;
   for(const sz of orderedSizes(st)){
     const got=r.sizes[sz];
-    items+=got?`<div class="item"><div class="box"><img src="${got.png}" width="${sz*view.zoom}" height="${sz*view.zoom}"></div><div class="cap">${sz} × ${sz} · ${view.zoom} 倍 · ${downloadLink(got.png)}</div></div>`
+    items+=got?`<div class="item"><div class="box"><img src="${got.png}" width="${sz*view.zoom}" height="${sz*view.zoom}"></div><div class="cap">${sz} × ${sz} · ${view.zoom} 倍</div></div>`
               :`<div class="item"><div class="box" style="width:${Math.max(120,sz*view.zoom)}px;height:${Math.max(120,sz*view.zoom)}px;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:12px">未生成</div><div class="cap">${sz} × ${sz}</div></div>`;
   }
   o.innerHTML=`<div class="bar"><button class="nav" id="prev" ${i<=0?"disabled":""}>‹</button><span class="name">${esc(view.asset)} <span style="color:var(--dim);font-weight:normal;font-size:12px">${i+1} / ${names.length}</span></span>

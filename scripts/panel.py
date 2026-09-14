@@ -8,18 +8,16 @@ Standard library only: http.server for the page, tkinter for the native folder d
 from __future__ import annotations
 
 import json
-import io
 import os
 import shutil
 import subprocess
 import sys
 import threading
 import webbrowser
-import zipfile
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse, urlencode, quote
+from urllib.parse import parse_qs, urlparse, urlencode
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(errors="replace")          # notes may be Chinese; a cp936 console must not crash the command
@@ -191,14 +189,6 @@ def export_images(job: dict) -> Path:
             raise ValueError("finished image must stay inside the finished images folder")
         shutil.copy2(source, target)
     return destination
-
-
-def download_images(job: dict) -> bytes:
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_STORED) as archive:
-        for source, name in deliverable_images(job):
-            archive.write(source, name)
-    return buffer.getvalue()
 
 
 def scan_results(job: dict) -> dict:
@@ -375,17 +365,6 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         elif url.path == "/api/state":
             self._json(state_payload())
-        elif url.path == "/api/download":
-            job = load_job()
-            if job is None:
-                self.send_error(404); return
-            data = download_images(job)
-            self.send_response(200)
-            self.send_header("Content-Type", "application/zip")
-            self.send_header("Content-Disposition", 'attachment; filename="Picxel-images.zip"')
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
         elif url.path == "/file":
             q = parse_qs(url.query)
             job = load_job()
@@ -401,9 +380,6 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "image/png" if target.suffix == ".png" else "image/jpeg" if target.suffix in (".jpg", ".jpeg") else "image/webp")
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "no-store")
-            if q.get("download") == ["1"]:
-                name = target.name.replace(".concept.png", "-效果图.png")
-                self.send_header("Content-Disposition", "attachment; filename*=UTF-8''" + quote(name))
             self.end_headers()
             self.wfile.write(data)
         else:
