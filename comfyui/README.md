@@ -19,3 +19,5 @@
 **Picxel 载入（读回成品）** — 填同一个文件夹和尺寸，把画好的 `<名>-<尺寸>.png` 读回 IMAGE + MASK，接着在 ComfyUI 里放大、拼图、存盘。优先读 `成品图` 文件夹。
 
 节点不 import Picxel、不跑任何算法；任务文件格式跟 `scripts/panel.py` 的 `save_job` 保持一致。
+
+代码采用 [GPL-3.0-only](LICENSE)。Copyright © 2026 See-Sol-Lab contributors.

@@ -24,7 +24,7 @@ SAFE_NAME = re.compile(r"[^\w\-]+", re.UNICODE)
 
 
 def now() -> str:
-    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+    return datetime.now(timezone.utc).astimezone().isoformat(timespec="microseconds")
 
 
 # ---------------------------------------------------------------- tensors <-> Pillow, without requiring torch here
@@ -54,6 +54,8 @@ def image_to_pil(image, mask=None) -> Image.Image:
     out = Image.frombytes("RGB", (w, h), rgb).convert("RGBA")
     if mask is not None:
         mrows = _rows(mask)
+        if len(mrows) != h or any(len(row) != w for row in mrows):
+            raise ValueError("MASK 的宽高必须与 IMAGE 一致")
         alpha = bytes(int((1.0 - max(0.0, min(1.0, v))) * 255 + 0.5) for row in mrows for v in row)
         out.putalpha(Image.frombytes("L", (w, h), alpha))
     return out

@@ -34,6 +34,10 @@ class ComfyBridge(unittest.TestCase):
         self.assertEqual(len(rgb), 2); self.assertEqual(len(rgb[0]), 3)
         self.assertAlmostEqual(rgb[0][0][0], 1.0); self.assertEqual(mask[0][2], 1.0); self.assertEqual(mask[0][0], 0.0)
 
+    def test_mask_with_transposed_dimensions_is_not_silently_reshaped(self):
+        with self.assertRaisesRegex(ValueError, "MASK"):
+            nodes.image_to_pil(frame(3, 2, (1, 0, 0)), [[0, 1], [1, 0], [0, 0]])
+
     def test_export_writes_pngs_and_the_panel_job(self):
         folder = self.root / "in"
         job = nodes.export_frames([frame(4, 4, (0.2, 0.4, 0.6)), frame(4, 4, (0.9, 0.1, 0.1))], folder, "hero", [128, 32, 999])
@@ -66,7 +70,7 @@ class ComfyBridge(unittest.TestCase):
         paths = nodes.finished_pngs(folder, 64)
         self.assertEqual([p.name for p in paths], ["hero-64.png"]); self.assertEqual(paths[0].parent.name, nodes.FINISHED_DIR)
         images, masks, names = nodes.PicxelLoad().run(str(folder), "64")
-        self.assertEqual(names, "hero-64.png"); self.assertEqual(images[0][0][0], [0.0, 1.0, 0.0]); self.assertEqual(masks[0][0][0], 1.0)
+        self.assertEqual(names, "hero-64.png"); self.assertEqual(nodes._rows(images[0])[0][0], [0.0, 1.0, 0.0]); self.assertEqual(nodes._rows(masks[0])[0][0], 1.0)
         self.assertEqual(nodes.finished_pngs(folder, 32), [])
         with self.assertRaisesRegex(ValueError, "没有 32"):
             nodes.PicxelLoad().run(str(folder), "32")

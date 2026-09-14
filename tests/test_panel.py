@@ -20,6 +20,15 @@ import panel
 
 
 class PanelFiles(unittest.TestCase):
+    def test_output_just_before_new_task_is_not_current(self):
+        job = panel.save_job({"import": str(self.src), "export": str(self.dst), "mode": "single", "files": ["a.png"], "sizes": [64]})
+        image = self.dst / "a.concept.png"
+        Image.new("RGBA", (64, 64)).save(image)
+        stamp = datetime.fromisoformat(job["created"]).timestamp() - 1
+        os.utime(image, (stamp, stamp))
+        self.assertFalse(panel.current_output(job, image))
+        self.assertIsNone(panel.scan_results(job)["results"]["a"]["concept"])
+
     def test_reused_directory_never_exports_old_or_incomplete_results(self):
         settings = {"import": str(self.src), "export": str(self.dst), "mode": "batch", "files": ["a.png"], "sizes": [32, 64]}
         job = panel.save_job(settings)

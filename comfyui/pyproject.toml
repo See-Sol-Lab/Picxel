@@ -2,7 +2,7 @@
 name = "picxel-comfyui"
 description = "Pipe images from a ComfyUI graph into the Picxel pixel-art panel, and read the finished sprites back."
 version = "0.1.0"
-license = { text = "MIT" }
+license = { text = "GPL-3.0-only" }
 dependencies = ["Pillow"]
 
 [project.urls]

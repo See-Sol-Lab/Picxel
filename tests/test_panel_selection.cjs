@@ -4,7 +4,8 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 const html = fs.readFileSync(path.join(__dirname, '../scripts/panel.html'), 'utf8');
-const context = vm.createContext({});
+const context = vm.createContext({localStorage:{getItem:()=> 'zh'}, navigator:{language:'zh'}});
+vm.runInContext(html.slice(html.indexOf('const T='), html.indexOf('function applyStatic(')), context);
 vm.runInContext(html.slice(html.indexOf('function mergePickedImages('), html.indexOf('\nasync function save(')), context);
 const merge = (current, paths) => JSON.parse(JSON.stringify(context.mergePickedImages(current, paths)));
 
@@ -47,4 +48,13 @@ test('case-sensitive paths remain distinct on Unix', () => {
   const current = {mode:'batch', import:'/assets', files:['A.png']};
   assert.deepEqual(merge(current, ['/assets/a.png']).files, ['A.png', 'a.png']);
   assert.throws(() => merge(current, ['/Assets/b.png']), /同一文件夹/);
+});
+
+test('selection errors use the real English translation too', () => {
+  vm.runInContext('lang="en"', context);
+  try {
+    assert.throws(() => merge({mode:'batch',import:'C:/assets',files:['a.png']}, ['D:/other/b.png']), /different folder/);
+  } finally {
+    vm.runInContext('lang="zh"', context);
+  }
 });

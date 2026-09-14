@@ -163,8 +163,7 @@ def image_url(name: str) -> str:
 
 def current_output(job: dict, path: Path) -> bool:
     """Only files produced since these settings were saved belong to this job."""
-    # 2 s of slack: the filesystem clock and datetime.now() can disagree by a few ms on Windows
-    return path.is_file() and path.stat().st_mtime >= datetime.fromisoformat(job["created"]).timestamp() - 2
+    return path.is_file() and path.stat().st_mtime >= datetime.fromisoformat(job["created"]).timestamp()
 
 
 def completed_image(job: dict, native: Path, preview: Path) -> bool:
