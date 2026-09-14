@@ -47,7 +47,7 @@ Python 不调用对话工具，也不启动 Codex / Claude 子进程。
 
 ## 人类面板
 
-`panel` 起一个只依赖标准库的本地页面（http.server + tkinter 对话框）。人在页面上选导入/导出位置、单张或批量（≤20）、尺寸、画风鉴定与子智能体并行两个勾选；页面写 `~/.picxel/current-job.json` 和导出目录里的 `picxel.status.json`（waiting），不调用助手。助手用 `job show / start / done / stop --note` 读任务、标状态；页面轮询状态文件和导出目录里的 `<name>-<size>@4x.png`：running 时统一转圈计时（长时间无新文件提示可能中断，可手动结束等待），done / interrupted 时按素材一排排显示原图与各尺寸成品（原生 PNG 按 2 倍真实比例显示），缺的标"未生成"并附原因（来自导出目录的 `batch-report.json`：`needs-*` / `check-failed` / `failed` / 尚无条目），同时露出报告里的校验警告与 `needs-face-review`；给出用时（`started`→`finished`）、结束时刻和打开导出位置的按钮。点卡片进对比层（原图 + 各尺寸，1/2/4/8 倍）。`style_check` 为真时页面读导入目录的 `batch.style.json`，把 `match:false` 的素材列为问题，用户点选后写回 `choice`（只接受 original / unify，只对离群素材）；`job show` 也会打印这些选择。`/api/clear` 删除任务文件（新任务）；导出目录不存在时页面直接说明。
+`panel` 起一个只依赖标准库的本地页面（http.server + tkinter 对话框）。人在页面上选图片（系统文件对话框，单张一张 / 批量多选，导入目录即所选文件所在目录）、导出位置、单张或批量（≤20）、尺寸、画风鉴定与子智能体并行两个勾选；页面写 `~/.picxel/current-job.json` 和导出目录里的 `picxel.status.json`（waiting），不调用助手。助手用 `job show / start / done / stop --note` 读任务、标状态；页面轮询状态文件和导出目录里的 `<name>-<size>@4x.png`：running 时统一转圈计时（长时间无新文件提示可能中断，可手动结束等待），done / interrupted 时按素材一排排显示原图与各尺寸成品（原生 PNG 按 2 倍真实比例显示），缺的标"未生成"并附原因（来自导出目录的 `batch-report.json`：`needs-*` / `check-failed` / `failed` / 尚无条目），同时露出报告里的校验警告与 `needs-face-review`；给出用时（`started`→`finished`）、结束时刻和打开导出位置的按钮。点卡片进对比层（原图 + 各尺寸，1/2/4/8 倍）。`style_check` 为真时页面读导入目录的 `batch.style.json`，把 `match:false` 的素材列为问题，用户点选后写回 `choice`（只接受 original / unify，只对离群素材）；`job show` 也会打印这些选择。`/api/clear` 删除任务文件（新任务）；导出目录不存在时页面直接说明。
 
 ## 批量与验收
 

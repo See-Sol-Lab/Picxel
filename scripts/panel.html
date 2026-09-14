@@ -7,8 +7,6 @@
 :root{--bg:#161a22;--panel:#1c212b;--card:#232936;--fg:#e6e8ee;--dim:#8d94a5;--line:#2e3442;--btn:#2b3140;--btn2:#343b4c;
   --accent:#6c5ce7;--ok:#3fb950;--warn:#e3b341;--bad:#f85149;--okbg:#1f3a2a;--warnbg:#3a3220;--badbg:#3a2323;
   --check1:#2a3040;--check2:#20262f;--overlay:rgba(8,10,14,.86)}
-@media (prefers-color-scheme:light){:root{--bg:#f3f4f7;--panel:#ffffff;--card:#ffffff;--fg:#1c2130;--dim:#6b7280;--line:#dfe2ea;--btn:#eef0f5;--btn2:#e2e5ee;
-  --okbg:#e3f5e8;--warnbg:#fbf3d9;--badbg:#fde4e4;--ok:#1f8a3b;--warn:#9a6d00;--bad:#c0262d;--check1:#d9dce4;--check2:#eceef3;--overlay:rgba(20,22,30,.82)}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;display:flex;min-height:100vh}
 aside{width:340px;flex:none;background:var(--panel);border-right:1px solid var(--line);padding:24px 22px;display:flex;flex-direction:column;gap:18px}
@@ -100,12 +98,9 @@ kbd{font:11px/1 ui-monospace,monospace;color:var(--dim);border:1px solid var(--l
   <div class="sub">你选位置，AI 在对话里画，这里看结果。</div>
 
   <div>
-    <div class="step">第一步 · 导入位置</div>
-    <div class="row">
-      <button id="pickImport">选择图片文件夹</button>
-      <button id="pickFiles">选几张图</button>
-    </div>
-    <div class="path" id="importPath"><span>未选择</span></div>
+    <div class="step">第一步 · 选图</div>
+    <button id="pickFiles">选择图片</button>
+    <div class="path" id="importPath"><span>单张选一张，批量可以多选（≤20）</span></div>
   </div>
 
   <div>
@@ -150,7 +145,7 @@ function pathLine(el,full,fallback,extra){
   el.querySelector(".copy").onclick=async e=>{try{await navigator.clipboard.writeText(norm);e.target.textContent="已复制";setTimeout(()=>e.target.textContent="复制",1200)}catch{err("复制失败，请手动选中路径")}};
 }
 function refreshSide(){
-  pathLine($("#importPath"),ui.import,"未选择",ui.files.length>1?`（${ui.files.length} 张）`:ui.files.length===1?`（${ui.files[0]}）`:"");
+  pathLine($("#importPath"),ui.import,"单张选一张，批量可以多选（≤20）",ui.files.length>1?`（${ui.files.length} 张）`:ui.files.length===1?`（${ui.files[0]}）`:"");
   pathLine($("#exportPath"),ui.export,"默认为导入位置下的 picxel-out","");
   $("#modeSingle").classList.toggle("on",ui.mode==="single");$("#modeBatch").classList.toggle("on",ui.mode==="batch");
   document.querySelectorAll("#sizes button").forEach(b=>b.classList.toggle("on",ui.sizes.includes(+b.dataset.s)));
@@ -158,7 +153,7 @@ function refreshSide(){
   $("#newJob").hidden=!ui.saved;
   const st=last&&last.job?last.status.state:null, h=$("#hint");
   h.classList.toggle("live",st==="running");
-  if(!ui.import)h.innerHTML="<b>选择好导入位置和导出位置后</b>请与 AI 对话开始生图";
+  if(!ui.import)h.innerHTML="<b>选好图片和导出位置后</b>请与 AI 对话开始生图";
   else if(st==="running")h.innerHTML="<b>AI 正在画</b>改动这里的设置不会影响正在进行的这批";
   else if(st==="done"||st==="interrupted")h.innerHTML="<b>这批已结束</b>想再画：点下面「新任务」，或直接换导入位置";
   else h.innerHTML="<b>位置已就绪</b>请与 AI 对话开始生图<br><span style='font-size:12px'>例如：“按面板的设置开始画”</span>";
@@ -171,7 +166,6 @@ async function save(){
   if(r.error){err(r.error);return}
   ui.saved=r.job;refreshSide();poll();
 }
-$("#pickImport").onclick=async()=>{const r=await api("/api/pick",{kind:"dir"});if(r.error)return err(r.error);if(r.paths[0]){ui.import=r.paths[0];ui.files=[];save()}};
 $("#pickFiles").onclick=async()=>{const r=await api("/api/pick",{kind:ui.mode==="single"?"file":"files"});if(r.error)return err(r.error);
   if(r.paths.length){const p=r.paths[0].replace(/\\/g,"/");ui.import=p.slice(0,p.lastIndexOf("/"));ui.files=r.paths.map(x=>x.replace(/\\/g,"/").split("/").pop());save()}};
 $("#pickExport").onclick=async()=>{const r=await api("/api/pick",{kind:"dir"});if(r.error)return err(r.error);if(r.paths[0]){ui.export=r.paths[0];save()}};

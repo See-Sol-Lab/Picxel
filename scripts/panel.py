@@ -243,6 +243,12 @@ def pick(kind: str) -> list[str]:
         from tkinter import filedialog
     except ImportError:
         raise RuntimeError("tkinter is not available; type the path instead")
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)   # otherwise Windows stretches the dialog and it looks blurry
+        except Exception:
+            pass
     root = tkinter.Tk()
     root.withdraw()
     root.attributes("-topmost", True)
