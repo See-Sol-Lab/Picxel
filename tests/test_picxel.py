@@ -156,6 +156,37 @@ class PipelineTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "exceeds"):
             px.extract_palette(source, 2, dict(self.anchor, palette=["#000000", "#ffffff", "#ff0000"]))
 
+    def test_key_spill_cleanup_is_one_pixel_wide_and_preserves_subject(self):
+        im = Image.new("RGBA", (16, 16), "magenta")
+        ImageDraw.Draw(im).rectangle((3, 3, 12, 12), fill="#202020")
+        im.putpixel((3, 5), (220, 10, 217, 255))  # darker key spill
+        im.putpixel((4, 5), (220, 10, 217, 255))  # no recursive erosion
+        im.putpixel((8, 8), (220, 10, 217, 255))  # interior subject color
+        im.putpixel((3, 7), (45, 2, 44, 255))    # dark outline
+        im.putpixel((3, 9), (180, 90, 176, 255)) # lower-saturation subject
+        im.putpixel((12, 8), (40, 130, 70, 140)) # original alpha and RGB
+        out = px._strip_background(im, "key:#ff00ff")
+        self.assertEqual(out.getpixel((3, 5))[3], 0)
+        for point in ((4, 5), (8, 8), (3, 7), (3, 9), (12, 8)):
+            self.assertEqual(out.getpixel(point), im.getpixel(point))
+        self.assertEqual(out.convert("RGB").tobytes(), im.convert("RGB").tobytes())
+
+    def test_key_spill_handles_hue_wrap_and_neutral_keys(self):
+        im = Image.new("RGBA", (16, 16), "red")
+        ImageDraw.Draw(im).rectangle((3, 3, 12, 12), fill="#202020")
+        im.putpixel((3, 5), (190, 0, 12, 255))
+        self.assertEqual(px._strip_background(im, "key:#ff0000").getpixel((3, 5))[3], 0)
+        neutral = Image.new("RGBA", (16, 16), "white")
+        ImageDraw.Draw(neutral).rectangle((3, 3, 12, 12), fill="#bbbbbb")
+        self.assertEqual(px._strip_background(neutral, "key:#ffffff").getpixel((3, 5))[3], 255)
+
+    def test_spill_cleanup_requires_explicit_key_mode(self):
+        im = Image.new("RGBA", (16, 16), "magenta")
+        ImageDraw.Draw(im).rectangle((3, 3, 12, 12), fill="#202020")
+        im.putpixel((3, 5), (220, 10, 217, 255))
+        self.assertEqual(px._strip_background(im, "none").tobytes(), im.tobytes())
+        self.assertEqual(px._strip_background(im, "auto").getpixel((3, 5)), im.getpixel((3, 5)))
+
     def test_sheet_name_cannot_escape_output_directory(self):
         sh = px.Sheet("../escape", 32, "tile", "custom", {"A": "#000000"}, ["A" * 32] * 32)
         self.assertTrue(px.check(sh)[0])

@@ -32,7 +32,7 @@ Inspect the output at native size and enlarged. Fix failures, then inspect the c
 - [ ] Preserve intentional asymmetry, tilt and pose in the anchor. Use symmetry only when the actual view calls for it.
 
 ## Before delivering
-- [ ] `check` passes with zero errors; every warning either fixed or explained in one line.
+- [ ] `check` passes with zero errors; inspect warnings, fix actual defects, and briefly group intentional details by cause instead of writing a line for every repeated warning.
 - [ ] Name is descriptive and stable (`grass-01`, `hero-idle-front`, `potion-red`), because the sheet JSON keys on it.
 - [ ] Check real alpha, no painted checkerboard/key-color halo, coherent flat material clusters, and consistent batch palette/light/view.
-- [ ] Record anchor yes/no per target size. Clearly separate an automatic base from a visually accepted final asset.
+- [ ] Verify anchor features at each target size; a concise per-asset result may cover all passing sizes. Clearly separate an automatic base from a visually accepted final asset.

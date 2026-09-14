@@ -1,9 +1,13 @@
 """The panel's job/status files and result scan -- no server, no dialogs."""
 from pathlib import Path
 import json
+import io
+import zipfile
 import sys
 import tempfile
 import unittest
+import subprocess
+import threading
 from unittest import mock
 
 from PIL import Image
@@ -13,6 +17,59 @@ import panel
 
 
 class PanelFiles(unittest.TestCase):
+    def test_finished_folder_contains_only_concepts_and_completed_native_images(self):
+        job = panel.save_job({"import": str(self.src), "export": str(self.dst), "mode": "single", "files": ["a.png"], "sizes": [32, 128]})
+        Image.new("RGBA", (200, 200), (0, 255, 0, 128)).save(self.dst / "a.concept.png")
+        Image.new("RGBA", (128, 128)).save(self.dst / "a-128.png")
+        Image.new("RGBA", (512, 512)).save(self.dst / "a-128@4x.png")
+        Image.new("RGBA", (32, 32)).save(self.dst / "a-32.png")  # not complete yet
+        Image.new("RGBA", (64, 64)).save(self.dst / "a.pre.png")
+        (self.dst / "a.pal").write_text("#000000")
+        (self.dst / "a.prompt.txt").write_text("work instructions")
+        folder = panel.export_images(job)
+        self.assertEqual(folder.name, "成品图")
+        self.assertEqual({p.name for p in folder.iterdir()}, {"a-效果图.png", "a-128.png"})
+        self.assertEqual((folder / "a-效果图.png").read_bytes(), (self.dst / "a.concept.png").read_bytes())
+        self.assertTrue((self.dst / "a.prompt.txt").exists())
+        self.assertTrue((self.dst / "a.pre.png").exists())
+        with zipfile.ZipFile(io.BytesIO(panel.download_images(job))) as archive:
+            self.assertEqual(archive.namelist(), ["a-效果图.png", "a-128.png"])
+            self.assertEqual(archive.read("a-效果图.png"), (self.dst / "a.concept.png").read_bytes())
+
+    def test_done_automatically_collects_deliverables(self):
+        panel.save_job({"import": str(self.src), "export": str(self.dst), "mode": "single", "files": ["a.png"], "sizes": [64]})
+        Image.new("RGBA", (64, 64)).save(self.dst / "a-64.png")
+        Image.new("RGBA", (256, 256)).save(self.dst / "a-64@4x.png")
+        panel.set_status(self.dst, "done")
+        self.assertEqual(panel.load_status(self.dst)["state"], "done")
+        self.assertTrue((self.dst / panel.FINISHED_DIR / "a-64.png").exists())
+
+    def test_concept_is_exposed_separately_from_original(self):
+        job = panel.save_job({"import": str(self.src), "export": str(self.dst), "mode": "single", "files": ["a.png"], "sizes": [64]})
+        self.assertIsNone(panel.scan_results(job)["results"]["a"]["concept"])
+        Image.new("RGBA", (200, 200)).save(self.dst / "a.concept.png")
+        self.assertEqual(panel.scan_results(job)["results"]["a"]["concept"], "/file?root=export&path=a.concept.png")
+
+    def test_picker_worker_uses_main_thread_subprocess_and_unicode_paths(self):
+        response = subprocess.CompletedProcess([], 0, '["C:/素材/瓶子.png"]', '')
+        results = []
+        with mock.patch.object(panel.subprocess, "run", return_value=response) as run:
+            worker = threading.Thread(target=lambda: results.append(panel.pick("files")))
+            worker.start()
+            worker.join()
+        self.assertEqual(results, [["C:/素材/瓶子.png"]])
+        self.assertEqual(run.call_args.args[0][-2:], ["--pick", "files"])
+        self.assertEqual(run.call_args.kwargs["encoding"], "utf-8")
+
+    def test_picker_cancel_and_error_are_reported(self):
+        with mock.patch.object(panel.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, '[]', '')):
+            self.assertEqual(panel.pick("dir"), [])
+        with mock.patch.object(panel.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, '', 'dialog unavailable')):
+            with self.assertRaisesRegex(RuntimeError, "dialog unavailable"):
+                panel.pick("file")
+        with self.assertRaises(ValueError):
+            panel.pick("invalid")
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         root = Path(self.tmp.name)

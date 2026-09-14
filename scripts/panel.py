@@ -10,15 +10,18 @@ Standard library only: http.server for the page, tkinter for the native folder d
 from __future__ import annotations
 
 import json
+import io
 import os
+import shutil
 import subprocess
 import sys
 import threading
 import webbrowser
+import zipfile
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlparse, urlencode, quote
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(errors="replace")          # notes may be Chinese; a cp936 console must not crash the command
@@ -30,6 +33,7 @@ JOB_FILE = Path.home() / ".picxel" / "current-job.json"
 STATUS_NAME = "picxel.status.json"
 REPORT_NAME = "batch-report.json"       # written by `picxel batch` into the export folder
 STYLE_NAME = "batch.style.json"         # written by `picxel batch --style-check` next to the reference images
+FINISHED_DIR = "成品图"
 IDLE_SECONDS = 240          # no new file in the export folder for this long while "running" -> looks interrupted
 PANEL_HTML = Path(__file__).with_name("panel.html")
 
@@ -116,6 +120,10 @@ def set_status(export: Path, state: str, note: str = "") -> dict:
     if state not in ("waiting", "running", "asking", "done", "interrupted"):
         raise ValueError("state must be waiting, running, asking, done or interrupted")
     export.mkdir(parents=True, exist_ok=True)
+    if state in ("done", "interrupted"):
+        job = load_job()
+        if job and Path(job["export"]).resolve() == export.resolve():
+            export_images(job)
     current = load_status(export)
     # `asking`: the assistant stopped for a human decision. Resuming with `running` keeps the
     # original start time, so the elapsed clock covers the whole batch.
@@ -131,6 +139,51 @@ def load_report(export: Path) -> dict:
     """batch-report.json as {asset name: job entry}; empty when the batch has not run."""
     report = read_json(export / REPORT_NAME, {})
     return {j["name"]: j for j in report.get("jobs", []) if isinstance(j, dict) and "name" in j}
+
+
+def image_url(name: str) -> str:
+    return "/file?" + urlencode({"root": "export", "path": name})
+
+
+def deliverable_images(job: dict) -> list[tuple[Path, str]]:
+    """Only completed native PNGs and background-removed concepts; no work files/previews."""
+    export = Path(job["export"])
+    files = []
+    for stem in dict.fromkeys(Path(f).stem for f in job["files"]):
+        concept = export / f"{stem}.concept.png"
+        if concept.is_file():
+            files.append((concept, f"{stem}-效果图.png"))
+        for size in sorted(set(job["sizes"]), reverse=True):
+            native = export / f"{stem}-{size}.png"
+            if native.is_file() and (export / f"{stem}-{size}@4x.png").is_file():
+                files.append((native, native.name))
+    if any(export.resolve() not in source.resolve().parents for source, _ in files):
+        raise ValueError("deliverable images must stay inside the export folder")
+    return files
+
+
+def export_images(job: dict) -> Path:
+    export = Path(job["export"]).resolve()
+    if not export.is_dir():
+        raise ValueError("export folder no longer exists")
+    destination = export / FINISHED_DIR
+    if export not in destination.resolve().parents:
+        raise ValueError("finished images folder must stay inside the export folder")
+    destination.mkdir(exist_ok=True)
+    for source, name in deliverable_images(job):
+        target = destination / name
+        if destination.resolve() not in target.resolve().parents:
+            raise ValueError("finished image must stay inside the finished images folder")
+        shutil.copy2(source, target)
+    return destination
+
+
+def download_images(job: dict) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_STORED) as archive:
+        for source, name in deliverable_images(job):
+            archive.write(source, name)
+    return buffer.getvalue()
 
 
 def scan_results(job: dict) -> dict:
@@ -151,8 +204,7 @@ def scan_results(job: dict) -> dict:
             preview, native = export / f"{stem}-{size}@4x.png", export / f"{stem}-{size}.png"
             if preview.exists():
                 shown = native if native.exists() else preview
-                sizes[str(size)] = {"png": f"/file?root=export&path={shown.name}",
-                                    "x4": f"/file?root=export&path={preview.name}"}
+                sizes[str(size)] = {"png": image_url(shown.name), "x4": image_url(preview.name)}
         entry = report.get(stem, {})
         problems = entry.get("problems", [])
         warnings = [p.replace("(warn) ", "") for p in problems if "(warn)" in p]
@@ -162,7 +214,9 @@ def scan_results(job: dict) -> dict:
         if status in ("check-failed", "failed") and errors:
             missing += "：" + errors[0]
         faces = [f["sheet"] for f in entry.get("face_review", []) if f.get("status") == "needs-face-review"]
-        results[stem] = {"sizes": sizes, "status": status, "missing": missing, "warnings": warnings,
+        concept = export / f"{stem}.concept.png"
+        results[stem] = {"sizes": sizes, "concept": image_url(concept.name) if concept.is_file() else None,
+                         "status": status, "missing": missing, "warnings": warnings,
                          "errors": errors, "faces": faces, "style": entry.get("style")}
     return {"results": results, "newest": newest,
             "done": sum(1 for s in stems if results[s]["sizes"]), "total": len(stems)}
@@ -245,6 +299,20 @@ def state_payload() -> dict:
 # ---------------------------------------------------------------- native dialogs / opening folders
 
 def pick(kind: str) -> list[str]:
+    """Keep Tk on a process main thread, outside HTTP request threads."""
+    if kind not in ("dir", "file", "files"):
+        raise ValueError("unknown picker kind")
+    result = subprocess.run(
+        [sys.executable, str(Path(__file__).resolve()), "--pick", kind],
+        capture_output=True, text=True, encoding="utf-8",
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+    )
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() or "file dialog failed")
+    return json.loads(result.stdout)
+
+
+def _pick_on_main_thread(kind: str) -> list[str]:
     """Open the OS file/folder dialog through tkinter and return the chosen paths ([] if cancelled)."""
     try:
         import tkinter
@@ -311,6 +379,17 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         elif url.path == "/api/state":
             self._json(state_payload())
+        elif url.path == "/api/download":
+            job = load_job()
+            if job is None:
+                self.send_error(404); return
+            data = download_images(job)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Disposition", 'attachment; filename="Picxel-images.zip"')
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
         elif url.path == "/file":
             q = parse_qs(url.query)
             job = load_job()
@@ -326,6 +405,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "image/png" if target.suffix == ".png" else "image/jpeg" if target.suffix in (".jpg", ".jpeg") else "image/webp")
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "no-store")
+            if q.get("download") == ["1"]:
+                name = target.name.replace(".concept.png", "-效果图.png")
+                self.send_header("Content-Disposition", "attachment; filename*=UTF-8''" + quote(name))
             self.end_headers()
             self.wfile.write(data)
         else:
@@ -357,7 +439,7 @@ class Handler(BaseHTTPRequestHandler):
                 if job is None:
                     raise ValueError("no job")
                 which = self._body().get("which", "export")
-                open_folder(Path(job["import" if which == "import" else "export"]))
+                open_folder(Path(job["import"]) if which == "import" else export_images(job))
                 self._json({"ok": True})
             else:
                 self.send_error(404)
@@ -378,6 +460,7 @@ def serve(port: int, open_browser: bool) -> int:
     finally:
         server.server_close()
     return 0
+
 
 
 # ---------------------------------------------------------------- `picxel job ...` for the assistant
@@ -401,3 +484,14 @@ def job_command(action: str, note: str) -> int:
     status = set_status(Path(job["export"]), state, note)
     print(f"job {state}: {job['export']}" + (f" -- {note}" if note else ""))
     return 0
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3 or sys.argv[1] != "--pick" or sys.argv[2] not in ("dir", "file", "files"):
+        raise SystemExit("usage: panel.py --pick dir|file|files")
+    sys.stdout.reconfigure(encoding="utf-8")
+    try:
+        print(json.dumps(_pick_on_main_thread(sys.argv[2]), ensure_ascii=False))
+    except Exception as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(1)

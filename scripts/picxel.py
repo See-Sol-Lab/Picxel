@@ -376,6 +376,16 @@ def _strip_background(img: Image.Image, mode: str) -> Image.Image:
         diff = ImageChops.difference(img.convert("RGB"), Image.new("RGB", img.size, color))
         r, g, b = diff.split()
         mask = ImageChops.lighter(ImageChops.lighter(r, g), b).point(lambda v: 0 if v <= 30 else 255)
+        # A narrow edge band catches darker chroma-key spill without globally
+        # deleting similar subject colors or extending into dark outlines.
+        key_h, key_s, _ = Image.new("RGB", (1, 1), color).convert("HSV").getpixel((0, 0))
+        if key_s >= 192:
+            hue, saturation, value = img.convert("RGB").convert("HSV").split()
+            spill = hue.point(lambda v: 255 if min(abs(v - key_h), 255 - abs(v - key_h)) <= 6 else 0)
+            spill = ImageChops.multiply(spill, saturation.point(lambda v: 255 if v >= max(192, key_s - 32) else 0))
+            spill = ImageChops.multiply(spill, value.point(lambda v: 255 if v >= 64 else 0))
+            edge = ImageChops.subtract(mask, mask.filter(ImageFilter.MinFilter(3)))
+            mask = ImageChops.subtract(mask, ImageChops.multiply(edge, spill))
         out = img.copy()
         out.putalpha(ImageChops.multiply(img.getchannel("A"), mask))
         return out
@@ -428,12 +438,18 @@ def _square(img: Image.Image, size: int) -> Image.Image:
 
 
 def import_png(src: Path, size: int, name: str | None, kind: str, palette: str, background: str = "none", colors: int = 16) -> Sheet:
+    with Image.open(src) as source:
+        img = _strip_background(source.convert("RGBA"), background)
+    return _import_image(img, size, name or src.stem, kind, palette, palette_colors(palette, src.parent), colors)
+
+
+def _import_image(img: Image.Image, size: int, name: str, kind: str, palette: str,
+                  master: list[str] | None, colors: int = 16) -> Sheet:
+    """Import one size; batch callers share a decoded concept and its palette."""
     if size not in SIZES or kind not in KINDS:
         raise ValueError("unsupported size or kind")
     if not 2 <= colors <= 16:
         raise ValueError("colors must be between 2 and 16")
-    img = Image.open(src).convert("RGBA")
-    img = _strip_background(img, background)
     # Native pixel art is already aligned. Preserve it byte-for-byte in geometry.
     if kind != "tile" and img.size != (size, size):
         img = _square(img, size)
@@ -443,7 +459,6 @@ def import_png(src: Path, size: int, name: str | None, kind: str, palette: str, 
     if w < size or w % size:
         img = img.resize((size * max(1, w // size),) * 2, Image.Resampling.BOX)
         w, h = img.size
-    master = palette_colors(palette, src.parent)
     if master is None:
         master = _palette_from_image(img, colors)
     if not master or len(master) > 256 or any(not _hex_ok(c) for c in master):
@@ -504,7 +519,7 @@ def import_png(src: Path, size: int, name: str | None, kind: str, palette: str, 
     symbol_of = {hexv: SYMBOLS[i] for i, hexv in enumerate(ordered)}
     rows = ["".join(TRANSPARENT if c is None else symbol_of[mapped[c]] for c in row) for row in cells]
     colors = {symbol_of[h]: h for h in ordered}
-    return Sheet(name or src.stem, size, kind, palette, colors, rows)
+    return Sheet(name, size, kind, palette, colors, rows)
 
 
 # ---------------------------------------------------------------- reference pipeline
@@ -609,10 +624,16 @@ def concept(pre: Path, anchor: dict, provider: str, out: Path, result: Path | No
     return out
 
 
-def concept_prompt(anchor: dict, style: dict | None = None, mode: str = "original") -> str:
+def concept_prompt(anchor: dict, style: dict | None = None, mode: str = "original", background: str = "auto") -> str:
     framing = ("Opaque square tile, matching opposite edges, no border or centered emblem."
                if anchor["kind"] == "tile" else
                "Single isolated subject on true transparency, entire silhouette visible with a small empty margin.")
+    if anchor["kind"] != "tile" and background.startswith("key:"):
+        color = background[4:].lower()
+        if not _hex_ok(color):
+            raise ValueError("key background must be key:#rrggbb")
+        framing = (f"Single isolated subject on a flat {color} background, entire silhouette visible with a small empty margin. "
+                   f"Reserve {color} for the background only; no backdrop shadow, color spill or painted checkerboard.")
     prompt = (f"Game pixel art: {anchor.get('subject', '')}. Target {anchor['size']}x{anchor['size']} logical pixels. "
             "Resolution-appropriate details; connected flat clusters, 2-3 shades/material, one pixel grid, "
             "top-left light, crisp stepped edges. No gradients, antialiasing, texture noise, dithering, decorations, text or watermark. "
@@ -819,6 +840,49 @@ def batch_style(src_dir: Path, images: dict[str, Path]) -> tuple[dict | None, st
     return review, ""
 
 
+def review_overview(jobs: list[dict], out_dir: Path) -> list[str]:
+    """Four assets per page: concept, then descending sizes at enlarged/native scale."""
+    ready = [j for j in jobs if j["status"] == "base-ready"]
+    pages = []
+    for offset in range(0, len(ready), 4):
+        rows = []
+        for job in ready[offset:offset + 4]:
+            filenames = [f"{job['name']}.concept.png"] + [str(Path(s).with_suffix(".png")) for s in job["sheets"]]
+            if any(Path(f).name != f for f in filenames):
+                raise ValueError("review image paths must be filenames inside the output folder")
+            images = []
+            for filename in filenames:
+                with Image.open(out_dir / filename) as source:
+                    images.append(source.convert("RGBA"))
+            rows.append((job["name"], [images[0]] + sorted(images[1:], key=lambda im: im.width, reverse=True)))
+        width, height = max(len(images) for _, images in rows) * 272, len(rows) * 448
+        canvas = Image.new("RGB", (width, height), "#20242d")
+        draw = ImageDraw.Draw(canvas)
+        for row, (name, images) in enumerate(rows):
+            for col, img in enumerate(images):
+                x, y = col * 272 + 8, row * 448
+                label = f"{name} / concept" if col == 0 else f"{name} / {img.width}px"
+                draw.text((x, y + 8), label, fill="white")
+                preview = img.copy()
+                if col == 0:
+                    preview.thumbnail((256, 256), Image.Resampling.BOX)
+                else:
+                    scale = max(1, 256 // img.width)
+                    preview = img.resize((img.width * scale, img.height * scale), Image.Resampling.NEAREST)
+                for cy in range(y + 32, y + 288, 16):
+                    for cx in range(x, x + 256, 16):
+                        shade = "#303640" if ((cx - x) // 16 + (cy - y - 32) // 16) % 2 else "#272c35"
+                        draw.rectangle((cx, cy, cx + 15, cy + 15), fill=shade)
+                canvas.paste(preview, (x + (256 - preview.width) // 2, y + 32 + (256 - preview.height) // 2), preview)
+                if col:
+                    draw.text((x, y + 298), "native", fill="#aab3c2")
+                    canvas.paste(img, (x + (256 - img.width) // 2, y + 316), img)
+        filename = f"review-{offset // 4 + 1}.png"
+        canvas.save(out_dir / filename)
+        pages.append(filename)
+    return pages
+
+
 def batch(src_dir: Path, out_dir: Path, provider: str, sizes: list[int] | None, concept_dir: Path | None = None,
           concept_background: str = "auto", only: list[str] | None = None, style_check: bool = True) -> int:
     """One directory = one batch. Every <name>.anchor.json + sibling image becomes a base sheet
@@ -879,7 +943,7 @@ def batch(src_dir: Path, out_dir: Path, provider: str, sizes: list[int] | None, 
             pre = out_dir / f"{stem}.pre.png"
             prompt = out_dir / f"{stem}.prompt.txt"
             prompt_style = dict(style, references=job.get("style_references", [])) if style is not None else None
-            prompt.write_text(concept_prompt(anchor, prompt_style, mode), encoding="utf-8")
+            prompt.write_text(concept_prompt(anchor, prompt_style, mode, concept_background), encoding="utf-8")
             job["prompt"] = prompt.name
             concept_name = f"{stem}.unified.png" if mode == "unify" else f"{stem}.png"
             job["concept_file"] = concept_name
@@ -894,9 +958,12 @@ def batch(src_dir: Path, out_dir: Path, provider: str, sizes: list[int] | None, 
                 continue
             con = concept(pre, anchor, provider, out_dir / f"{stem}.concept.png", result, concept_background)
             pal_path = out_dir / f"{stem}.pal"
-            pal_path.write_text("\n".join(extract_palette(con, len(SYMBOLS), anchor)) + "\n", encoding="utf-8")
+            with Image.open(con) as source:
+                decoded = source.convert("RGBA")
+            master = _palette_from_image(decoded, len(SYMBOLS), anchor)
+            pal_path.write_text("\n".join(master) + "\n", encoding="utf-8")
             for size in sizes or [anchor["size"]]:
-                sheet = import_png(con, size, f"{stem}-{size}", anchor["kind"], pal_path.name, background="none")
+                sheet = _import_image(decoded, size, f"{stem}-{size}", anchor["kind"], pal_path.name, master)
                 sheet.path = out_dir / f"{stem}-{size}.pxg"      # check resolves the .pal relative to the sheet
                 # Fine regions already have a sampling budget; never blindly erase
                 # all isolated pixels before the assistant has inspected features.
@@ -929,6 +996,7 @@ def batch(src_dir: Path, out_dir: Path, provider: str, sizes: list[int] | None, 
             failed += 1
     report_path = out_dir / "batch-report.json"
     payload = {"provider": provider, "jobs": jobs}
+    payload["previews"] = review_overview(jobs, out_dir)
     if only is not None:
         payload["selected"] = sorted(set(only))
     report_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -954,7 +1022,8 @@ def batch(src_dir: Path, out_dir: Path, provider: str, sizes: list[int] | None, 
             if face["status"] == "needs-face-review":
                 print(f"    face review: {face['sheet']} -> {face['prompt']}")
     if todo:
-        print("next: refine each base sheet against its anchor (erase + paint, <= 20 steps) -- queue or parallel per SKILL.md")
+        print("review: " + ", ".join(str(out_dir / p) for p in payload["previews"]))
+        print("next: inspect concepts and requested sizes together; fix only observed failures. Passing assets need no edits.")
     return 1 if failed else (2 if any(j["status"].startswith("needs-") for j in jobs) else 0)
 
 
@@ -1079,6 +1148,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--background", default="none", help="none | auto (most common corner color) | #rrggbb - made transparent")
     p.add_argument("-o", "--out", type=Path, help="output .pxg (default: <name>.pxg next to the image)")
     p = sub.add_parser("sheet"); p.add_argument("dir", type=Path); p.add_argument("-o", "--out", type=Path); p.add_argument("--columns", type=int, default=8)
+    p = sub.add_parser("review", help="refresh concept/native/enlarged contact sheets after local edits"); p.add_argument("dir", type=Path)
     p = sub.add_parser("mosaic"); p.add_argument("image", type=Path); p.add_argument("--anchor", type=Path, required=True); p.add_argument("-o", "--out", type=Path)
     p.add_argument("--background", default="auto", help="none | auto | #rrggbb - stripped before blocking")
     p = sub.add_parser("concept"); p.add_argument("image", type=Path, help="the pre-processed (mosaic) reference"); p.add_argument("--anchor", type=Path, required=True)
@@ -1149,7 +1219,7 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "concept":
         anchor = load_anchor(a.anchor)
         if a.prompt_only:
-            print(concept_prompt(anchor))
+            print(concept_prompt(anchor, background=a.background))
             return 0
         out = concept(a.image, anchor, a.provider, a.out or a.image.with_name(a.image.stem.replace(".pre", "") + ".concept.png"), a.result, a.background)
         print(f"concept ({a.provider}) -> {out}")
@@ -1210,6 +1280,11 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "panel":
         from panel import serve
         return serve(a.port, not a.no_open)
+    if a.cmd == "review":
+        payload = json.loads((a.dir / "batch-report.json").read_text(encoding="utf-8"))
+        previews = review_overview(payload["jobs"], a.dir)
+        print("review: " + (", ".join(str(a.dir / p) for p in previews) or "no completed assets"))
+        return 0
     if a.cmd == "job":
         from panel import job_command
         return job_command(a.action, a.note)

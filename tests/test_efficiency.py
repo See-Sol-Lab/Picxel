@@ -132,6 +132,64 @@ class EfficiencyTests(unittest.TestCase):
                          "one pixel grid", "2-3 shades/material", "antialiasing", "pose and proportions"):
             self.assertIn(required, text)
 
+    def test_explicit_background_is_consistent_with_generation_prompt(self):
+        prompt = px.concept_prompt(self.anchor, background="key:#00ff00")
+        self.assertIn("flat #00ff00 background", prompt)
+        self.assertIn("background only", prompt)
+        self.assertNotIn("true transparency", prompt)
+        tile = px.concept_prompt(dict(self.anchor, kind="tile"), background="key:#00ff00")
+        self.assertIn("Opaque square tile", tile)
+        self.assertNotIn("#00ff00", tile)
+
+    def test_batch_overview_and_refresh_use_only_selected_assets(self):
+        self.asset("gem")
+        concepts = self.root / "concepts"
+        concepts.mkdir()
+        with Image.open(self.root / "gem.png") as image:
+            image.save(concepts / "gem.png")
+        out = self.root / "out"
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(px.batch(self.root, out, "codex", [32, 128, 64], concepts, only=["gem"]), 0)
+        report = json.loads((out / "batch-report.json").read_text())
+        self.assertEqual(report["previews"], ["review-1.png"])
+        with Image.open(out / "review-1.png") as overview:
+            self.assertEqual(overview.size, (1088, 448))
+        # Refresh consumes the rendered results, not the original source or model.
+        (self.root / "gem.png").unlink()
+        Image.new("RGBA", (128, 128), "blue").save(out / "gem-128.png")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(px.main(["review", str(out)]), 0)
+        with Image.open(out / "review-1.png") as overview:
+            self.assertEqual(overview.getpixel((280 + 128, 32 + 128)), (0, 0, 255))
+            self.assertEqual(overview.getpixel((280 + 128, 316 + 64)), (0, 0, 255))
+
+    def test_overview_pages_and_failures(self):
+        jobs = []
+        out = self.root
+        for i in range(5):
+            name = f"gem{i}"
+            Image.new("RGBA", (32, 32), "red").save(out / f"{name}.concept.png")
+            Image.new("RGBA", (32, 32), "red").save(out / f"{name}-32.png")
+            jobs.append({"name": name, "status": "base-ready", "sheets": [f"{name}-32.pxg"]})
+        jobs.append({"name": "failed", "status": "failed", "sheets": []})
+        self.assertEqual(px.review_overview(jobs, out), ["review-1.png", "review-2.png"])
+        with Image.open(out / "review-2.png") as overview:
+            self.assertEqual(overview.size, (544, 448))
+        self.assertEqual(px.review_overview(jobs[-1:], out), [])
+
+    def test_shared_decoded_concept_preserves_native_colors_and_input(self):
+        image = Image.new("RGBA", (128, 128))
+        image.paste((16, 16, 16, 255), (20, 20, 108, 108))
+        image.putpixel((60, 60), (17, 17, 17, 255))
+        original = image.tobytes()
+        palette = ["#101010", "#111111"]
+        for size in (32, 64, 128):
+            sheet = px._import_image(image, size, "gem", "item", "custom", palette)
+            self.assertEqual(image.tobytes(), original)
+            self.assertFalse(px.check(sheet)[0])
+            if size == 128:
+                self.assertEqual(sheet.image().tobytes(), original)
+
 
 if __name__ == "__main__":
     unittest.main()
