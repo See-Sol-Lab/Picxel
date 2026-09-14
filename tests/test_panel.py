@@ -138,7 +138,11 @@ class PanelFiles(unittest.TestCase):
             worker.start()
             worker.join()
         self.assertEqual(results, [["C:/素材/瓶子.png"]])
-        self.assertEqual(run.call_args.args[0][-2:], ["--pick", "files"])
+        self.assertEqual(run.call_args.args[0][-3:], ["--pick", "files", "zh"])
+        with mock.patch.object(panel.subprocess, "run", return_value=response) as run:
+            panel.pick("dir", "en")
+        self.assertEqual(run.call_args.args[0][-3:], ["--pick", "dir", "en"])
+        self.assertEqual(panel.msg("busy", "en")[:3], "The"); self.assertEqual(panel.msg("busy", None)[:2], "当前")
         self.assertEqual(run.call_args.kwargs["encoding"], "utf-8")
 
     def test_picker_cancel_and_error_are_reported(self):
@@ -215,6 +219,8 @@ class PanelFiles(unittest.TestCase):
         self.assertNotIn("warnings", r["a"]); self.assertEqual(r["a"]["errors"], [])      # check hints stay in the report, off the page
         self.assertEqual(r["a"]["faces"], ["a-64.pxg"])
         self.assertEqual(r["b"]["missing"], "底稿没过校验：64: too many colors")
+        self.assertEqual((r["b"]["missing_code"], r["b"]["missing_detail"]), ("check-failed", "64: too many colors"))
+        self.assertEqual(r["a"]["missing_code"], "")                               # complete: nothing missing
 
     def test_clear_job_and_missing_export_folder(self):
         panel.save_job({"import": str(self.src), "export": str(self.dst), "mode": "batch"})

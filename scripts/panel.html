@@ -91,43 +91,138 @@ kbd{font:11px/1 ui-monospace,monospace;color:var(--dim);border:1px solid var(--l
 </style>
 <body>
 <aside>
-  <h1>Picxel <small id="ver">可视化面板</small></h1>
-  <div class="sub">批量生成你的像素画游戏素材</div>
+  <div class="row" style="justify-content:space-between;align-items:flex-start">
+    <h1>Picxel <small id="ver"></small></h1>
+    <button id="lang" class="mini" title="切换语言 / Switch language"></button>
+  </div>
+  <div class="sub" id="sub"></div>
 
   <div>
-    <div class="step">第一步 · 选图</div>
-    <button id="pickFiles">选择图片</button>
-    <div class="path" id="importPath"><span>单张选一张，批量可以多选（≤20）</span></div>
+    <div class="step" id="step1"></div>
+    <button id="pickFiles"></button>
+    <div class="path" id="importPath"><span></span></div>
   </div>
 
   <div>
-    <div class="step">第二步 · 导出位置</div>
-    <button id="pickExport">选择输出文件夹</button>
-    <div class="path" id="exportPath"><span>默认为导入位置下的 picxel-out</span></div>
+    <div class="step" id="step2"></div>
+    <button id="pickExport"></button>
+    <div class="path" id="exportPath"><span></span></div>
   </div>
 
   <div>
-    <div class="step">第三步 · 模式</div>
+    <div class="step" id="step3"></div>
     <div class="row">
-      <span class="seg"><button id="modeSingle" class="on">单张</button><button id="modeBatch">批量（≤20）</button></span>
+      <span class="seg"><button id="modeSingle" class="on"></button><button id="modeBatch"></button></span>
       <span class="seg" id="sizes"><button data-s="32">32</button><button data-s="64" class="on">64</button><button data-s="128">128</button></span>
     </div>
   </div>
 
   <div class="err" id="err"></div>
-  <div class="hint" id="hint"><b>选择好导入位置和导出位置后</b>请与 AI 对话开始生图</div>
-  <button id="newJob" hidden>新任务（清空当前设置）</button>
+  <div class="hint" id="hint"></div>
+  <button id="newJob" hidden></button>
 </aside>
 
-<main id="main"><div class="center">面板会在这里显示结果。</div></main>
+<main id="main"><div class="center"></div></main>
 
 <script>
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+// ---------- every string a human sees, in both languages
+const T={
+zh:{
+  ver:"可视化面板",sub:"批量生成你的像素画游戏素材",lang:"EN",
+  step1:"第一步 · 选图",pick:"选择图片",pickMore:"继续添加图片",importHint:"单张选一张，批量可以多选（≤20）",
+  step2:"第二步 · 导出位置",pickExport:"选择输出文件夹",exportHint:"默认为导入位置下的 picxel-out",
+  step3:"第三步 · 模式",single:"单张",batch:"批量（≤20）",newJob:"新任务（清空当前设置）",
+  copy:"复制",copied:"已复制",copyTitle:"复制路径",copyFail:"复制失败，请手动选中路径",
+  count:n=>`（${n} 张）`,
+  hintPick:"<b>选好图片和导出位置后</b>请与 AI 对话开始生图",
+  hintRunning:"<b>AI 正在画</b>当前设置已锁定，可在任务结束后调整",
+  hintAsking:"<b>AI 在等你</b>看右边的问题，选好后在对话里说“继续”",
+  hintDone:"<b>这批已结束</b>想再画：点下面「新任务」，或直接换导入位置",
+  hintReady:"<b>位置已就绪</b>请与 AI 对话开始生图<br><span style='font-size:12px'>例如：“按面板的设置开始画”</span>",
+  errSameFolder:"同一批图片请放在同一个文件夹中，已选列表保持不变。",
+  errOtherFolder:"这批图片来自另一个文件夹。请把素材放到同一文件夹，或点「新任务」重新选择；已选列表保持不变。",
+  errLimit:"每批最多 20 张图片，已选列表保持不变。",
+  confirmClear:"AI 还在画这批。清空设置不会停止它，只是面板不再显示这批。继续？",
+  empty:"面板会在这里显示结果。",
+  exportMissing:p=>`导出文件夹不在了：<b>${esc(p)}</b><br>可能被删了或换了盘。重新选一个导出位置，或者点「新任务」。`,
+  importMissing:p=>`导入文件夹不在了：${esc(p)}。成品还能看，原图显示不出来。`,
+  recorded:(n,mode,sizes)=>`已记录 ${n} 张 · ${mode==="single"?"单张":"批量"} · ${sizes}`,waitAI:"等 AI 开始",
+  stalled:idle=>`${idle} 没有新文件了——AI 可能停了（用量、网络或别的）。可以继续等，或者`,stopWait:"结束等待，看已完成的",
+  drawing:el=>`AI 正在画 · 已用 ${el}`,haveResults:(d,t)=>`${d} / ${t} 张已有结果`,
+  askingPill:"AI 在等你决定",askingElapsed:(el,d,t)=>`已用 ${el} · ${d} / ${t} 张已有结果`,askingNotice:"请在对话里回复，AI 再继续生成。",
+  okPill:(d,t)=>`生成成功 ${d} / ${t}`,interruptedPill:(d,t)=>`生成中断 · 完成 ${d} / ${t}`,
+  elapsedPill:(el,fin)=>`用时 ${el}${fin?" · "+fin+" 结束":""}`,openFinished:"打开成品图",
+  faces:n=>`面部待修 · ${n}`,draftFailed:"底稿失败",viewOriginal:"查看原图",
+  concept:"效果图",noConcept:"未生成效果图",notGenerated:"未生成",
+  missing:{"needs-concept":"等效果图","check-failed":"底稿没过校验",failed:"底稿失败","base-ready":"底稿有了，AI 还没画这个尺寸",
+           "needs-style-review":"等 AI 完成画风鉴定","needs-style-choice":"等你选画风",none:"AI 还没画到这张"},
+  wbTitle:"单张制作台",original:"原图",conceptPending:"效果图就绪后显示在这里",pixel:"像素成品",pixelPending:"等待像素成品",
+  replay:"重播绘制演示",skip:"直接看成品",disclosure:"色块显现演示，非模型内部落笔记录。成品在导出文件夹里，后续修画会更新画面。",
+  phaseDone:"制作完成",phaseInterrupted:"生成已中断，展示已有结果",phaseAsking:"等待你的决定",phasePixelReady:"像素成品已就绪，等待验收",
+  phaseConceptReady:"效果图已就绪，正在准备像素成品",phaseGenerating:el=>`正在生成效果图 · 已用 ${el}`,
+  pixelCaption:sz=>`${sz} × ${sz} · 像素成品`,loadFail:"预览加载失败，成品在导出文件夹里",shown:"成品已显示",playing:"正在播放色块显现演示",
+  zoomCap:(sz,z)=>`${sz} × ${sz} · ${z} 倍`,close:"关闭",
+  sec:s=>`${s} 秒`,minSec:(m,s)=>`${m} 分 ${s} 秒`,hrMin:(h,m)=>`${h} 时 ${m} 分`,locale:"zh-CN",
+},
+en:{
+  ver:"Visual Panel",sub:"Batch-generate pixel-art game assets",lang:"中文",
+  step1:"Step 1 · Pick images",pick:"Choose images",pickMore:"Add more images",importHint:"One image in single mode, up to 20 in batch mode",
+  step2:"Step 2 · Output folder",pickExport:"Choose output folder",exportHint:"Defaults to picxel-out inside the image folder",
+  step3:"Step 3 · Mode",single:"Single",batch:"Batch (≤20)",newJob:"New task (clear settings)",
+  copy:"Copy",copied:"Copied",copyTitle:"Copy path",copyFail:"Copy failed, please select the path by hand",
+  count:n=>`(${n} images)`,
+  hintPick:"<b>Pick images and an output folder</b>then ask the AI in chat to start",
+  hintRunning:"<b>AI is drawing</b>Settings are locked until this task ends",
+  hintAsking:"<b>AI is waiting for you</b>See the question on the right, then say “continue” in chat",
+  hintDone:"<b>This task is finished</b>To draw more, click “New task” below or pick other images",
+  hintReady:"<b>Ready</b>Ask the AI in chat to start<br><span style='font-size:12px'>e.g. “Start drawing with the panel settings”</span>",
+  errSameFolder:"Images in one batch must come from the same folder; the selection was left unchanged.",
+  errOtherFolder:"These images are in a different folder. Move them together or click “New task”; the selection was left unchanged.",
+  errLimit:"A batch holds at most 20 images; the selection was left unchanged.",
+  confirmClear:"The AI is still drawing this task. Clearing the settings won't stop it, the panel just stops showing it. Continue?",
+  empty:"Results will show up here.",
+  exportMissing:p=>`The output folder is gone: <b>${esc(p)}</b><br>It may have been deleted or moved. Choose another output folder or click “New task”.`,
+  importMissing:p=>`The image folder is gone: ${esc(p)}. Results still show, originals won't.`,
+  recorded:(n,mode,sizes)=>`${n} image${n===1?"":"s"} · ${mode==="single"?"single":"batch"} · ${sizes}`,waitAI:"Waiting for the AI to start",
+  stalled:idle=>`No new files for ${idle} — the AI may have stopped (quota, network, or something else). Keep waiting, or`,stopWait:"Stop waiting, show what's done",
+  drawing:el=>`AI is drawing · ${el}`,haveResults:(d,t)=>`${d} of ${t} done`,
+  askingPill:"AI needs your decision",askingElapsed:(el,d,t)=>`${el} · ${d} of ${t} done`,askingNotice:"Reply in chat and the AI will continue.",
+  okPill:(d,t)=>`Done ${d} / ${t}`,interruptedPill:(d,t)=>`Interrupted · ${d} / ${t} done`,
+  elapsedPill:(el,fin)=>`Took ${el}${fin?" · finished "+fin:""}`,openFinished:"Open finished images",
+  faces:n=>`Face touch-up · ${n}`,draftFailed:"Draft failed",viewOriginal:"View original",
+  concept:"Concept",noConcept:"No concept yet",notGenerated:"Not generated",
+  missing:{"needs-concept":"Waiting for the concept","check-failed":"Draft failed validation",failed:"Draft failed","base-ready":"Draft ready, the AI hasn't drawn this size yet",
+           "needs-style-review":"Waiting for the AI's style review","needs-style-choice":"Waiting for your style choice",none:"The AI hasn't reached this one yet"},
+  wbTitle:"Single-image workbench",original:"Original",conceptPending:"The concept appears here when ready",pixel:"Pixel result",pixelPending:"Waiting for the pixel result",
+  replay:"Replay reveal",skip:"Show result",disclosure:"A color-block reveal, not the model's actual stroke order. The result is in the output folder; later touch-ups refresh the picture.",
+  phaseDone:"Finished",phaseInterrupted:"Interrupted, showing what exists",phaseAsking:"Waiting for your decision",phasePixelReady:"Pixel result ready, awaiting review",
+  phaseConceptReady:"Concept ready, preparing the pixel result",phaseGenerating:el=>`Generating the concept · ${el}`,
+  pixelCaption:sz=>`${sz} × ${sz} · pixel result`,loadFail:"Preview failed to load; the result is in the output folder",shown:"Result shown",playing:"Playing the reveal",
+  zoomCap:(sz,z)=>`${sz} × ${sz} · ${z}×`,close:"Close",
+  sec:s=>`${s}s`,minSec:(m,s)=>`${m}m ${s}s`,hrMin:(h,m)=>`${h}h ${m}m`,locale:"en-US",
+}};
+let lang=(()=>{try{const v=localStorage.getItem("picxel-lang");if(v in T)return v}catch{}return /^zh/i.test(navigator.language)?"zh":"en"})();
+const t=k=>T[lang][k];
+function applyStatic(){
+  document.documentElement.lang=lang;
+  for(const id of ["ver","sub","step1","step2","step3","newJob","pickExport"])$("#"+id).textContent=t(id);
+  $("#modeSingle").textContent=t("single");$("#modeBatch").textContent=t("batch");$("#lang").textContent=t("lang");
+  const c=$("#main .center");if(c&&!last?.job)c.textContent=t("empty");
+}
+$("#lang").onclick=()=>{
+  lang=lang==="zh"?"en":"zh";try{localStorage.setItem("picxel-lang",lang)}catch{}
+  applyStatic();clearSingle();
+  if(last)render(last);else refreshSide();
+  if(view.asset)drawCompare();
+};
+
 let ui={import:"",export:"",files:[],mode:"single",sizes:[64],saved:null};
 let last=null;                                  // latest /api/state payload
 let view={asset:null,zoom:4};                   // compare overlay
-const api=(p,b)=>fetch(p,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b||{})}).then(r=>r.json());
+const api=(p,b)=>fetch(p,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...(b||{}),lang})}).then(r=>r.json());
 function err(m){$("#err").textContent=m||""}
 
 // ---------- sidebar
@@ -135,39 +230,39 @@ function pathLine(el,full,fallback,extra){
   if(!full){el.innerHTML=`<span>${esc(fallback)}</span>`;return}
   const norm=full.replace(/\//g,"\\"), i=norm.lastIndexOf("\\");
   const head=i>=0?norm.slice(0,i+1):"", tail=i>=0?norm.slice(i+1):norm;
-  el.innerHTML=`<span title="${esc(norm)}">${esc(head)}<b class="folder">${esc(tail)}</b>${extra?" "+esc(extra):""}</span><button class="mini copy" title="复制路径">复制</button>`;
-  el.querySelector(".copy").onclick=async e=>{try{await navigator.clipboard.writeText(norm);e.target.textContent="已复制";setTimeout(()=>e.target.textContent="复制",1200)}catch{err("复制失败，请手动选中路径")}};
+  el.innerHTML=`<span title="${esc(norm)}">${esc(head)}<b class="folder">${esc(tail)}</b>${extra?" "+esc(extra):""}</span><button class="mini copy" title="${esc(t("copyTitle"))}">${esc(t("copy"))}</button>`;
+  el.querySelector(".copy").onclick=async e=>{try{await navigator.clipboard.writeText(norm);e.target.textContent=t("copied");setTimeout(()=>e.target.textContent=t("copy"),1200)}catch{err(t("copyFail"))}};
 }
 function refreshSide(){
-  $("#pickFiles").textContent=ui.mode==="batch"&&ui.files.length?"继续添加图片":"选择图片";
-  pathLine($("#importPath"),ui.import,"单张选一张，批量可以多选（≤20）",ui.files.length>1?`（${ui.files.length} 张）`:ui.files.length===1?`（${ui.files[0]}）`:"");
-  pathLine($("#exportPath"),ui.export,"默认为导入位置下的 picxel-out","");
+  $("#pickFiles").textContent=ui.mode==="batch"&&ui.files.length?t("pickMore"):t("pick");
+  pathLine($("#importPath"),ui.import,t("importHint"),ui.files.length>1?t("count")(ui.files.length):ui.files.length===1?`（${ui.files[0]}）`:"");
+  pathLine($("#exportPath"),ui.export,t("exportHint"),"");
   $("#modeSingle").classList.toggle("on",ui.mode==="single");$("#modeBatch").classList.toggle("on",ui.mode==="batch");
   document.querySelectorAll("#sizes button").forEach(b=>b.classList.toggle("on",ui.sizes.includes(+b.dataset.s)));
   $("#newJob").hidden=!ui.saved;
   const st=last&&last.job?last.status.state:null, h=$("#hint");
   const busy=st==="running"||st==="asking";
   document.querySelectorAll("#pickFiles,#pickExport,#modeSingle,#modeBatch,#sizes button").forEach(b=>b.disabled=busy);
-  h.classList.toggle("live",st==="running"||st==="asking");
-  if(!ui.import)h.innerHTML="<b>选好图片和导出位置后</b>请与 AI 对话开始生图";
-  else if(st==="running")h.innerHTML="<b>AI 正在画</b>当前设置已锁定，可在任务结束后调整";
-  else if(st==="asking")h.innerHTML="<b>AI 在等你</b>看右边的问题，选好后在对话里说“继续”";
-  else if(st==="done"||st==="interrupted")h.innerHTML="<b>这批已结束</b>想再画：点下面「新任务」，或直接换导入位置";
-  else h.innerHTML="<b>位置已就绪</b>请与 AI 对话开始生图<br><span style='font-size:12px'>例如：“按面板的设置开始画”</span>";
+  h.classList.toggle("live",busy);
+  if(!ui.import)h.innerHTML=t("hintPick");
+  else if(st==="running")h.innerHTML=t("hintRunning");
+  else if(st==="asking")h.innerHTML=t("hintAsking");
+  else if(st==="done"||st==="interrupted")h.innerHTML=t("hintDone");
+  else h.innerHTML=t("hintReady");
 }
 function mergePickedImages(current,paths){
   if(!paths.length)return {import:current.import,files:[...current.files]};
   const selected=(current.mode==="single"?paths.slice(0,1):paths).map(p=>p.replace(/\\/g,"/"));
   const folder=selected[0].slice(0,selected[0].lastIndexOf("/"));
   const windows=/^(?:[a-z]:\/|\/\/)/i.test(folder), key=s=>windows?s.toLowerCase():s;
-  if(selected.some(p=>key(p.slice(0,p.lastIndexOf("/")))!==key(folder)))throw Error("同一批图片请放在同一个文件夹中，已选列表保持不变。");
+  if(selected.some(p=>key(p.slice(0,p.lastIndexOf("/")))!==key(folder)))throw Error(t("errSameFolder"));
   const append=current.mode==="batch"&&current.files.length>0;
-  if(append&&key(current.import.replace(/\\/g,"/"))!==key(folder))throw Error("这批图片来自另一个文件夹。请把素材放到同一文件夹，或点「新任务」重新选择；已选列表保持不变。");
+  if(append&&key(current.import.replace(/\\/g,"/"))!==key(folder))throw Error(t("errOtherFolder"));
   const files=[],seen=new Set();
   for(const name of [...(append?current.files:[]),...selected.map(p=>p.slice(p.lastIndexOf("/")+1))]){
     if(!seen.has(key(name))){seen.add(key(name));files.push(name)}
   }
-  if(files.length>20)throw Error("每批最多 20 张图片，已选列表保持不变。");
+  if(files.length>20)throw Error(t("errLimit"));
   return {import:append?current.import:folder,files};
 }
 async function save(selection={}){
@@ -189,15 +284,16 @@ $("#modeSingle").onclick=()=>{ui.mode="single";save();refreshSide()};
 $("#modeBatch").onclick=()=>{ui.mode="batch";save();refreshSide()};
 document.querySelectorAll("#sizes button").forEach(b=>b.onclick=()=>{const s=+b.dataset.s;ui.sizes=ui.sizes.includes(s)?ui.sizes.filter(x=>x!==s):[...ui.sizes,s].sort((a,b)=>a-b);if(!ui.sizes.length)ui.sizes=[64];save();refreshSide()});
 $("#newJob").onclick=async()=>{
-  if(last&&last.status.state==="running"&&!confirm("AI 还在画这批。清空设置不会停止它，只是面板不再显示这批。继续？"))return;
+  if(last&&last.status.state==="running"&&!confirm(t("confirmClear")))return;
   await api("/api/clear");ui={import:"",export:"",files:[],mode:"single",sizes:[64],saved:null};
   last=null;refreshSide();render({job:null});
 };
 
 // ---------- main
-function fmt(sec){sec=Math.floor(sec||0);return sec<60?`${sec} 秒`:sec<3600?`${Math.floor(sec/60)} 分 ${sec%60} 秒`:`${Math.floor(sec/3600)} 时 ${Math.floor(sec%3600/60)} 分`}
-function clock(iso){if(!iso)return"";const d=new Date(iso);return d.toLocaleTimeString("zh-CN",{hour:"2-digit",minute:"2-digit"})}
+function fmt(sec){sec=Math.floor(sec||0);return sec<60?t("sec")(sec):sec<3600?t("minSec")(Math.floor(sec/60),sec%60):t("hrMin")(Math.floor(sec/3600),Math.floor(sec%3600/60))}
+function clock(iso){if(!iso)return"";const d=new Date(iso);return d.toLocaleTimeString(t("locale"),{hour:"2-digit",minute:"2-digit"})}
 const orderedSizes=st=>[...st.job.sizes].sort((a,b)=>b-a);
+function missingText(r){const m=t("missing");const base=m[r.missing_code]||m.none;return r.missing_detail?`${base}: ${r.missing_detail}`:base}
 
 // Single-image presentation uses delivered pixels, never invented model strokes.
 let single=null;
@@ -210,16 +306,16 @@ function singleResult(st){
 }
 function mountSingle(st){
   const host=$("#singleHost");if(!host)return;
-  const [name,r]=singleResult(st), key=JSON.stringify([st.job.created,st.job.export,name,st.status.started]);
+  const [name,r]=singleResult(st), key=JSON.stringify([st.job.created,st.job.export,name,st.status.started,lang]);
   if(!single||single.key!==key){
     clearSingle();
     const node=document.createElement("section");node.className="single-stage";
-    node.innerHTML=`<h2>单张制作台</h2><div class="phase" role="status"></div><div class="workbench">
-      <figure><figcaption>原图</figcaption><div class="surface"><img class="source" alt="原始参考图"></div></figure>
-      <figure><figcaption>效果图</figcaption><div class="surface"><img class="concept" alt="已生成效果图" hidden><span class="empty-note">效果图就绪后显示在这里</span></div></figure>
-      <figure class="pixel-view"><figcaption class="pixel-caption">像素成品</figcaption><div class="surface"><canvas hidden aria-label="像素成品的色块显现演示"></canvas><span class="empty-note">等待像素成品</span></div></figure></div>
-      <div class="row controls"><button class="replay" disabled>重播绘制演示</button><button class="skip" disabled>直接看成品</button><span class="play-state" role="status"></span></div>
-      <p class="disclosure">色块显现演示，非模型内部落笔记录。成品在导出文件夹里，后续修画会更新画面。</p>`;
+    node.innerHTML=`<h2>${esc(t("wbTitle"))}</h2><div class="phase" role="status"></div><div class="workbench">
+      <figure><figcaption>${esc(t("original"))}</figcaption><div class="surface"><img class="source" alt="${esc(t("original"))}"></div></figure>
+      <figure><figcaption>${esc(t("concept"))}</figcaption><div class="surface"><img class="concept" alt="${esc(t("concept"))}" hidden><span class="empty-note">${esc(t("conceptPending"))}</span></div></figure>
+      <figure class="pixel-view"><figcaption class="pixel-caption">${esc(t("pixel"))}</figcaption><div class="surface"><canvas hidden aria-label="${esc(t("pixel"))}"></canvas><span class="empty-note">${esc(t("pixelPending"))}</span></div></figure></div>
+      <div class="row controls"><button class="replay" disabled>${esc(t("replay"))}</button><button class="skip" disabled>${esc(t("skip"))}</button><span class="play-state" role="status"></span></div>
+      <p class="disclosure">${esc(t("disclosure"))}</p>`;
     single={key,node,frame:0,version:"",image:null};
     node.querySelector(".source").src=st.originals[name];
     node.querySelector(".replay").onclick=()=>playSingle(single);
@@ -229,7 +325,7 @@ function mountSingle(st){
   current.live=current.live||st.status.state==="running";
   const el=s=>current.node.querySelector(s);
   const size=orderedSizes(st).find(n=>r.sizes[n]), got=r.sizes[size];
-  el(".phase").textContent=st.status.state==="done"?"制作完成":st.status.state==="interrupted"?"生成已中断，展示已有结果":st.status.state==="asking"?"等待你的决定":got?"像素成品已就绪，等待验收":r.concept?"效果图已就绪，正在准备像素成品":"正在生成效果图 · 已用 "+fmt(st.elapsed);
+  el(".phase").textContent=st.status.state==="done"?t("phaseDone"):st.status.state==="interrupted"?t("phaseInterrupted"):st.status.state==="asking"?t("phaseAsking"):got?t("phasePixelReady"):r.concept?t("phaseConceptReady"):t("phaseGenerating")(fmt(st.elapsed));
   const concept=el(".concept");concept.hidden=!r.concept;concept.nextElementSibling.hidden=!!r.concept;
   const conceptUrl=r.concept?r.concept+"&v="+r.concept_updated:"";
   if(concept.dataset.version!==conceptUrl){concept.dataset.version=conceptUrl;if(conceptUrl)concept.src=conceptUrl}
@@ -241,18 +337,18 @@ function mountSingle(st){
   img.onload=()=>{
     if(single!==current||current.version!==version)return;
     current.image=img;const canvas=el("canvas");canvas.width=img.width;canvas.height=img.height;canvas.hidden=false;canvas.nextElementSibling.hidden=true;
-    el(".pixel-caption").textContent=`${size} × ${size} · 像素成品`;
+    el(".pixel-caption").textContent=t("pixelCaption")(size);
     el(".replay").disabled=el(".skip").disabled=false;
     if(first&&current.live)playSingle(current);else finishSingle(current);
   };
-  img.onerror=()=>{if(single===current&&current.version===version)el(".play-state").textContent="预览加载失败，成品在导出文件夹里"};
+  img.onerror=()=>{if(single===current&&current.version===version)el(".play-state").textContent=t("loadFail")};
   img.src=version;
 }
 function finishSingle(current){
   if(!current?.image)return;cancelAnimationFrame(current.frame);
   const canvas=current.node.querySelector("canvas"),ctx=canvas.getContext("2d");
   ctx.clearRect(0,0,canvas.width,canvas.height);ctx.drawImage(current.image,0,0);
-  current.node.querySelector(".play-state").textContent="成品已显示";
+  current.node.querySelector(".play-state").textContent=t("shown");
 }
 function playSingle(current){
   if(!current?.image)return;
@@ -265,7 +361,7 @@ function playSingle(current){
     const color=Array.from(pixels.data.slice(i,i+4)).join(",");if(!groups.has(color))groups.set(color,[]);groups.get(color).push(i)}
   const order=[...groups.values()].sort((a,b)=>b.length-a.length).flat(), frame=ctx.createImageData(canvas.width,canvas.height);
   ctx.clearRect(0,0,canvas.width,canvas.height);let drawn=0,start=null;
-  current.node.querySelector(".play-state").textContent="正在播放色块显现演示";
+  current.node.querySelector(".play-state").textContent=t("playing");
   function tick(now){
     if(single!==current)return;if(start===null)start=now;
     const end=Math.min(order.length,Math.floor(order.length*(now-start)/5000));
@@ -278,52 +374,51 @@ function playSingle(current){
 
 function assetBlock(st,name,r){
   const tags=[];
-  if(r.faces&&r.faces.length)tags.push(`<span class="tag warn">面部待修 · ${r.faces.length}</span>`);
-  if(r.errors&&r.errors.length)tags.push(`<span class="tag bad">底稿失败</span>`);
-  let h=`<div class="asset"><div class="head"><span class="name">${esc(name)}</span>${tags.join("")}<a class="original-link" href="${esc(st.originals[name])}" target="_blank" rel="noopener">查看原图</a></div><div class="strip">`;
-  h+=r.concept?`<div class="card orig" data-open="${esc(name)}"><div class="t"><span>效果图</span></div><div class="img"><img src="${esc(r.concept)}" alt="${esc(name)} 效果图"></div></div>`
-              :`<div class="card empty"><div class="t"><span>效果图</span></div><div class="img"><span class="miss">未生成效果图</span></div></div>`;
+  if(r.faces&&r.faces.length)tags.push(`<span class="tag warn">${esc(t("faces")(r.faces.length))}</span>`);
+  if(r.errors&&r.errors.length)tags.push(`<span class="tag bad">${esc(t("draftFailed"))}</span>`);
+  let h=`<div class="asset"><div class="head"><span class="name">${esc(name)}</span>${tags.join("")}<a class="original-link" href="${esc(st.originals[name])}" target="_blank" rel="noopener">${esc(t("viewOriginal"))}</a></div><div class="strip">`;
+  h+=r.concept?`<div class="card orig" data-open="${esc(name)}"><div class="t"><span>${esc(t("concept"))}</span></div><div class="img"><img src="${esc(r.concept)}" alt="${esc(name)} ${esc(t("concept"))}"></div></div>`
+              :`<div class="card empty"><div class="t"><span>${esc(t("concept"))}</span></div><div class="img"><span class="miss">${esc(t("noConcept"))}</span></div></div>`;
   for(const sz of orderedSizes(st)){
     const got=r.sizes[sz];
-    h+=got?`<div class="card" data-open="${esc(name)}"><div class="t"><span>${sz} × ${sz}</span></div><div class="img"><img src="${esc(got.png)}&amp;t=${encodeURIComponent(st.status.updated||"")}" alt="${esc(name)} ${sz}像素"></div></div>`
-          :`<div class="card empty"><div class="t"><span>${sz} × ${sz}</span></div><div class="img"><span class="miss">未生成${r.missing?"<br>"+esc(r.missing):""}</span></div></div>`;
+    h+=got?`<div class="card" data-open="${esc(name)}"><div class="t"><span>${sz} × ${sz}</span></div><div class="img"><img src="${esc(got.png)}&amp;t=${encodeURIComponent(st.status.updated||"")}" alt="${esc(name)} ${sz}px"></div></div>`
+          :`<div class="card empty"><div class="t"><span>${sz} × ${sz}</span></div><div class="img"><span class="miss">${esc(t("notGenerated"))}<br>${esc(missingText(r))}</span></div></div>`;
   }
-  h+=`</div>`;
-  return h+`</div>`;
+  return h+`</div></div>`;
 }
 function render(st){
   last=st;
   if(!st.job||st.job.mode!=="single"||st.export_missing||st.status.state==="waiting")clearSingle();
   const m=$("#main");
-  if(!st.job){m.innerHTML='<div class="center">面板会在这里显示结果。</div>';refreshSide();return}
+  if(!st.job){m.innerHTML=`<div class="center">${esc(t("empty"))}</div>`;refreshSide();return}
   if(st.export_missing){
-    m.innerHTML=`<div class="notice bad">导出文件夹不在了：<b>${esc(st.job.export)}</b><br>可能被删了或换了盘。重新选一个导出位置，或者点「新任务」。</div>`;refreshSide();return}
+    m.innerHTML=`<div class="notice bad">${t("exportMissing")(st.job.export)}</div>`;refreshSide();return}
   const s=st.status.state;
-  let html=st.import_missing?`<div class="notice">导入文件夹不在了：${esc(st.job.import)}。成品还能看，原图显示不出来。</div>`:"";
+  let html=st.import_missing?`<div class="notice">${t("importMissing")(st.job.import)}</div>`:"";
   if(s==="waiting"){
-    html+=`<div class="banner"><span class="pill">已记录 ${st.total} 张 · ${st.job.mode==="single"?"单张":"批量"} · ${st.job.sizes.join(" / ")}</span><span class="pill">等 AI 开始</span></div>`;
+    html+=`<div class="banner"><span class="pill">${esc(t("recorded")(st.total,st.job.mode,st.job.sizes.join(" / ")))}</span><span class="pill">${esc(t("waitAI"))}</span></div>`;
     html+=`<div class="strip">`+Object.keys(st.results).map(n=>`<div class="card orig empty"><div class="t">${esc(n)}</div><div class="img"><img src="${st.originals[n]}"></div></div>`).join("")+`</div>`;
     m.innerHTML=html;refreshSide();return}
   if(s==="running"){
-    const stall=st.status.looks_stalled?`<div style="color:var(--warn)">${fmt(st.idle)} 没有新文件了——AI 可能停了（用量、网络或别的）。可以继续等，或者<button id="stopBtn" style="margin-left:6px">结束等待，看已完成的</button></div>`:"";
+    const stall=st.status.looks_stalled?`<div style="color:var(--warn)">${esc(t("stalled")(fmt(st.idle)))}<button id="stopBtn" style="margin-left:6px">${esc(t("stopWait"))}</button></div>`:"";
     if(st.job.mode==="single"){
       const [name,r]=singleResult(st);
       m.innerHTML=html+`<div id="singleHost"></div>`+stall+((r.concept||Object.keys(r.sizes).length)?assetBlock(st,name,r):"");mountSingle(st);
       document.querySelectorAll("[data-open]").forEach(c=>c.onclick=e=>{if(!e.target.closest("a"))openCompare(c.dataset.open)});
-    }else m.innerHTML=html+`<div class="center"><div class="spin"></div><div>AI 正在画 · 已用 ${fmt(st.elapsed)}</div><div>${st.done} / ${st.total} 张已有结果</div>${stall}</div>`;
+    }else m.innerHTML=html+`<div class="center"><div class="spin"></div><div>${esc(t("drawing")(fmt(st.elapsed)))}</div><div>${esc(t("haveResults")(st.done,st.total))}</div>${stall}</div>`;
     const b=$("#stopBtn");if(b)b.onclick=()=>api("/api/stop").then(poll);
     refreshSide();return}
   if(s==="asking"){
     // the assistant stopped for a human decision: no spinner, the question first, then what exists so far
-    html+=`<div class="banner"><span class="pill warn">AI 在等你决定</span>${st.status.note?`<span class="pill">${esc(st.status.note)}</span>`:""}<span class="pill">已用 ${fmt(st.elapsed)} · ${st.done} / ${st.total} 张已有结果</span></div>`;
-    html+=`<div class="notice">请在对话里回复，AI 再继续生成。</div>`;
+    html+=`<div class="banner"><span class="pill warn">${esc(t("askingPill"))}</span>${st.status.note?`<span class="pill">${esc(st.status.note)}</span>`:""}<span class="pill">${esc(t("askingElapsed")(fmt(st.elapsed),st.done,st.total))}</span></div>`;
+    html+=`<div class="notice">${esc(t("askingNotice"))}</div>`;
   }else{
     // done / interrupted: cards for what exists, honest line for what doesn't
     const ok=s==="done";
-    html+=`<div class="banner">${ok?`<span class="pill ok">生成成功 ${st.done} / ${st.total}</span>`:`<span class="pill warn">生成中断 · 完成 ${st.done} / ${st.total}</span>`}`;
+    html+=`<div class="banner">${ok?`<span class="pill ok">${esc(t("okPill")(st.done,st.total))}</span>`:`<span class="pill warn">${esc(t("interruptedPill")(st.done,st.total))}</span>`}`;
     if(st.status.note)html+=`<span class="pill">${esc(st.status.note)}</span>`;
-    if(st.elapsed!=null)html+=`<span class="pill">用时 ${fmt(st.elapsed)}${st.status.finished?" · "+clock(st.status.finished)+" 结束":""}</span>`;
-    html+=`<button id="openBtn">打开成品图</button></div>`;
+    if(st.elapsed!=null)html+=`<span class="pill">${esc(t("elapsedPill")(fmt(st.elapsed),st.status.finished?clock(st.status.finished):""))}</span>`;
+    html+=`<button id="openBtn">${esc(t("openFinished"))}</button></div>`;
   }
   if(st.job.mode==="single")html+=`<div id="singleHost"></div>`;
   for(const [name,r] of Object.entries(st.results))html+=assetBlock(st,name,r);
@@ -340,15 +435,15 @@ function drawCompare(){
   const st=last;if(!st||!view.asset||!st.results[view.asset]){closeCompare();return}
   const names=Object.keys(st.results), i=names.indexOf(view.asset), r=st.results[view.asset];
   let o=$(".overlay");if(!o){o=document.createElement("div");o.className="overlay";document.body.appendChild(o);o.onclick=e=>{if(e.target===o)closeCompare()}}
-  let items=r.concept?`<div class="item orig"><div class="box"><img src="${esc(r.concept)}" alt="效果图"></div><div class="cap">效果图</div></div>`:`<div class="item"><div class="cap">效果图未生成</div></div>`;
+  let items=r.concept?`<div class="item orig"><div class="box"><img src="${esc(r.concept)}" alt="${esc(t("concept"))}"></div><div class="cap">${esc(t("concept"))}</div></div>`:`<div class="item"><div class="cap">${esc(t("noConcept"))}</div></div>`;
   for(const sz of orderedSizes(st)){
     const got=r.sizes[sz];
-    items+=got?`<div class="item"><div class="box"><img src="${got.png}" width="${sz*view.zoom}" height="${sz*view.zoom}"></div><div class="cap">${sz} × ${sz} · ${view.zoom} 倍</div></div>`
-              :`<div class="item"><div class="box" style="width:${Math.max(120,sz*view.zoom)}px;height:${Math.max(120,sz*view.zoom)}px;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:12px">未生成</div><div class="cap">${sz} × ${sz}</div></div>`;
+    items+=got?`<div class="item"><div class="box"><img src="${got.png}" width="${sz*view.zoom}" height="${sz*view.zoom}"></div><div class="cap">${esc(t("zoomCap")(sz,view.zoom))}</div></div>`
+              :`<div class="item"><div class="box" style="width:${Math.max(120,sz*view.zoom)}px;height:${Math.max(120,sz*view.zoom)}px;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:12px">${esc(t("notGenerated"))}</div><div class="cap">${sz} × ${sz}</div></div>`;
   }
   o.innerHTML=`<div class="bar"><button class="nav" id="prev" ${i<=0?"disabled":""}>‹</button><span class="name">${esc(view.asset)} <span style="color:var(--dim);font-weight:normal;font-size:12px">${i+1} / ${names.length}</span></span>
     <span class="seg" id="zoom">${[1,2,4,8].map(z=>`<button data-z="${z}" class="${z===view.zoom?"on":""}">${z}×</button>`).join("")}</span>
-    <button class="nav" id="next" ${i>=names.length-1?"disabled":""}>›</button><button id="close">关闭 <kbd>Esc</kbd></button></div><div class="stage">${items}</div>`;
+    <button class="nav" id="next" ${i>=names.length-1?"disabled":""}>›</button><button id="close">${esc(t("close"))} <kbd>Esc</kbd></button></div><div class="stage">${items}</div>`;
   $("#close").onclick=closeCompare;
   $("#prev").onclick=()=>{view.asset=names[i-1];drawCompare()};$("#next").onclick=()=>{view.asset=names[i+1];drawCompare()};
   o.querySelectorAll("#zoom button").forEach(b=>b.onclick=()=>{view.zoom=+b.dataset.z;drawCompare()});
@@ -369,7 +464,7 @@ async function poll(){
     if(!st.job&&ui.saved)ui={import:"",export:"",files:[],mode:"single",sizes:[64],saved:null};
     if(view.asset){last=st;drawCompare();refreshSide()}else render(st)}catch(e){}
 }
-refreshSide();poll();setInterval(poll,2000);
+applyStatic();refreshSide();poll();setInterval(poll,2000);
 </script>
 </body>
 </html>

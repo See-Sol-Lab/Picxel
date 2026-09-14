@@ -40,6 +40,19 @@ MISSING_REASON = {
     "base-ready": "底稿有了，AI 还没画这个尺寸",
 }
 
+# The few server-side strings a human reads, in the page's current language (`lang` in each POST body).
+MESSAGES = {
+    "zh": {"busy": "当前任务尚未结束，请先结束等待或新建任务，再修改设置。", "stopped": "面板上手动结束等待",
+           "dir": "选择文件夹", "file": "选择一张图片", "files": f"选择图片（最多 {BATCH_LIMIT} 张）"},
+    "en": {"busy": "The current task has not finished. Stop waiting or start a new task before changing settings.",
+           "stopped": "Stopped waiting from the panel",
+           "dir": "Choose a folder", "file": "Choose an image", "files": f"Choose images (up to {BATCH_LIMIT})"},
+}
+
+
+def msg(key: str, lang: str | None) -> str:
+    return MESSAGES["en" if lang == "en" else "zh"][key]
+
 
 def now() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="microseconds")
@@ -64,7 +77,7 @@ def save_job(job: dict) -> dict:
     """Validate the panel's choices and write the job file the assistant will read."""
     current = load_job()
     if current and load_status(Path(current["export"]))["state"] in ("running", "asking"):
-        raise ValueError("当前任务尚未结束，请先结束等待或新建任务，再修改设置。")
+        raise ValueError(msg("busy", job.get("lang")))
     problems = []
     src, dst = Path(job.get("import") or ""), Path(job.get("export") or "")
     if not job.get("import") or not src.is_dir():
@@ -150,7 +163,8 @@ def image_url(name: str) -> str:
 
 def current_output(job: dict, path: Path) -> bool:
     """Only files produced since these settings were saved belong to this job."""
-    return path.is_file() and path.stat().st_mtime >= datetime.fromisoformat(job["created"]).timestamp()
+    # 2 s of slack: the filesystem clock and datetime.now() can disagree by a few ms on Windows
+    return path.is_file() and path.stat().st_mtime >= datetime.fromisoformat(job["created"]).timestamp() - 2
 
 
 def completed_image(job: dict, native: Path, preview: Path) -> bool:
@@ -214,14 +228,18 @@ def scan_results(job: dict) -> dict:
         # "(warn)" lines are check hints for the assistant (isolated pixels etc.); the page shows only real failures
         errors = [p for p in entry.get("problems", []) if "(warn)" not in p]
         status = entry.get("status")
-        missing = MISSING_REASON.get(status, "AI 还没画到这张") if len(sizes) < len(job["sizes"]) else ""
-        if status in ("check-failed", "failed") and errors:
-            missing += "：" + errors[0]
+        incomplete = len(sizes) < len(job["sizes"])
+        missing = MISSING_REASON.get(status, "AI 还没画到这张") if incomplete else ""
+        detail = errors[0] if status in ("check-failed", "failed") and errors else ""
+        if detail:
+            missing += "：" + detail
         faces = [f["sheet"] for f in entry.get("face_review", []) if f.get("status") == "needs-face-review"]
         concept = export / f"{stem}.concept.png"
         results[stem] = {"sizes": sizes, "concept": image_url(concept.name) if current_output(job, concept) else None,
                          "concept_updated": concept.stat().st_mtime if current_output(job, concept) else None,
-                         "status": status, "missing": missing, "errors": errors, "faces": faces}
+                         "status": status, "missing": missing, "errors": errors, "faces": faces,
+                         "missing_code": (status if status in MISSING_REASON else "none") if incomplete else "",
+                         "missing_detail": detail}
     return {"results": results, "newest": newest,
             "done": sum(all(str(n) in results[s]["sizes"] for n in job["sizes"]) for s in stems), "total": len(stems)}
 
@@ -267,12 +285,12 @@ def state_payload() -> dict:
 
 # ---------------------------------------------------------------- native dialogs / opening folders
 
-def pick(kind: str) -> list[str]:
+def pick(kind: str, lang: str | None = None) -> list[str]:
     """Keep Tk on a process main thread, outside HTTP request threads."""
     if kind not in ("dir", "file", "files"):
         raise ValueError("unknown picker kind")
     result = subprocess.run(
-        [sys.executable, str(Path(__file__).resolve()), "--pick", kind],
+        [sys.executable, str(Path(__file__).resolve()), "--pick", kind, "en" if lang == "en" else "zh"],
         capture_output=True, text=True, encoding="utf-8",
         creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
     )
@@ -281,7 +299,7 @@ def pick(kind: str) -> list[str]:
     return json.loads(result.stdout)
 
 
-def _pick_on_main_thread(kind: str) -> list[str]:
+def _pick_on_main_thread(kind: str, lang: str = "zh") -> list[str]:
     """Open the OS file/folder dialog through tkinter and return the chosen paths ([] if cancelled)."""
     try:
         import tkinter
@@ -299,12 +317,12 @@ def _pick_on_main_thread(kind: str) -> list[str]:
     root.attributes("-topmost", True)
     try:
         if kind == "dir":
-            chosen = filedialog.askdirectory(title="选择文件夹")
+            chosen = filedialog.askdirectory(title=msg("dir", lang))
             return [chosen] if chosen else []
         if kind == "file":
-            chosen = filedialog.askopenfilename(title="选择一张图片", filetypes=[("Images", "*.png *.jpg *.jpeg *.webp")])
+            chosen = filedialog.askopenfilename(title=msg("file", lang), filetypes=[("Images", "*.png *.jpg *.jpeg *.webp")])
             return [chosen] if chosen else []
-        chosen = filedialog.askopenfilenames(title=f"选择图片（最多 {BATCH_LIMIT} 张）", filetypes=[("Images", "*.png *.jpg *.jpeg *.webp")])
+        chosen = filedialog.askopenfilenames(title=msg("files", lang), filetypes=[("Images", "*.png *.jpg *.jpeg *.webp")])
         return list(chosen)
     finally:
         root.destroy()
@@ -387,7 +405,8 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         try:
             if url.path == "/api/pick":
-                self._json({"paths": pick(self._body().get("kind", "dir"))})
+                b = self._body()
+                self._json({"paths": pick(b.get("kind", "dir"), b.get("lang"))})
             elif url.path == "/api/job":
                 self._json({"job": save_job(self._body())})
             elif url.path == "/api/clear":
@@ -395,11 +414,11 @@ class Handler(BaseHTTPRequestHandler):
                 clear_job()
                 self._json({"ok": True})
             elif url.path == "/api/stop":
-                self._body()
+                b = self._body()
                 job = load_job()
                 if job is None:
                     raise ValueError("no job")
-                self._json({"status": set_status(Path(job["export"]), "interrupted", "面板上手动结束等待")})
+                self._json({"status": set_status(Path(job["export"]), "interrupted", msg("stopped", b.get("lang")))})
             elif url.path == "/api/open":
                 job = load_job()
                 if job is None:
@@ -450,11 +469,11 @@ def job_command(action: str, note: str) -> int:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3 or sys.argv[1] != "--pick" or sys.argv[2] not in ("dir", "file", "files"):
-        raise SystemExit("usage: panel.py --pick dir|file|files")
+    if len(sys.argv) not in (3, 4) or sys.argv[1] != "--pick" or sys.argv[2] not in ("dir", "file", "files"):
+        raise SystemExit("usage: panel.py --pick dir|file|files [zh|en]")
     sys.stdout.reconfigure(encoding="utf-8")
     try:
-        print(json.dumps(_pick_on_main_thread(sys.argv[2]), ensure_ascii=False))
+        print(json.dumps(_pick_on_main_thread(sys.argv[2], sys.argv[3] if len(sys.argv) == 4 else "zh"), ensure_ascii=False))
     except Exception as exc:
         print(str(exc), file=sys.stderr)
         raise SystemExit(1)
