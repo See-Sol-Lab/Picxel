@@ -38,6 +38,9 @@ from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(errors="replace")   # style questions may be Chinese; a cp936 console must not crash the command
+
 SIZES = (32, 64, 128)
 KINDS = ("tile", "item", "sprite")
 SYMBOLS = "ABCDEFGHIJKLMNOP"

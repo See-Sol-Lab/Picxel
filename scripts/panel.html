@@ -233,9 +233,9 @@ function render(st){
     m.innerHTML=html;bindStyle();refreshSide();return}
   if(s==="running"){
     const stall=st.status.looks_stalled?`<div style="color:var(--warn)">${fmt(st.idle)} 没有新文件了——AI 可能停了（用量、网络或别的）。可以继续等，或者<button id="stopBtn" style="margin-left:6px">结束等待，看已完成的</button></div>`:"";
-    m.innerHTML=html+`<div class="center"><div class="spin"></div><div>AI 正在画 · 已用 ${fmt(st.elapsed)}</div><div>${st.done} / ${st.total} 张已有结果</div>${stall}</div>`;
+    m.innerHTML=html+styleBlock(st)+`<div class="center"><div class="spin"></div><div>AI 正在画 · 已用 ${fmt(st.elapsed)}</div><div>${st.done} / ${st.total} 张已有结果</div>${stall}</div>`;
     const b=$("#stopBtn");if(b)b.onclick=()=>api("/api/stop").then(poll);
-    refreshSide();return}
+    bindStyle();refreshSide();return}
   // done / interrupted: cards for what exists, honest line for what doesn't
   const ok=s==="done";
   html+=`<div class="banner">${ok?`<span class="pill ok">生成成功 ${st.done} / ${st.total}</span>`:`<span class="pill warn">生成中断 · 完成 ${st.done} / ${st.total}</span>`}`;
