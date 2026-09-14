@@ -52,7 +52,9 @@ python scripts/picxel.py face work/hero-64.pxg --anchor refs/hero.anchor.json --
 python scripts/picxel.py sheet work -o work/dist
 ```
 
-`--only` processes named assets, preserves unrelated outputs, and writes a report for that invocation. Use a separate redo folder when retaining reviewed results; do not rerun the whole batch just to package it. `show --full` is available only when the entire grid is actually needed. After major edits to a larger sprite, `derive big-128.pxg --sizes 64,32` can create smaller starting points, but inspect their eyes/handles independently.
+`--only` processes named assets, preserves unrelated outputs, and writes a report for that invocation. Use a separate redo folder when retaining reviewed results; do not rerun the whole batch just to package it. `show --full` is available only when the entire grid is actually needed; `show --box` numbers its columns from the box's own x0, not from 0, so read edit coordinates off that ruler. After major edits to a larger sprite, `derive big-128.pxg --sizes 64,32` can create smaller starting points, but inspect their eyes/handles independently. `derive` writes only the `.pxg`: render the derived sheets yourself (`render(load(path), out_dir)`) or the panel and the delivery folder never see them.
+
+Photographs with a real background (sky, grass, a room) do not clean up on their own: the mosaic only floods a uniform color from the corners, and the palette step folds dark features (legs, hair) into the background greys. Ask the user for a transparent or plain-colored version first when possible; otherwise strip the background symbols on the largest sheet, repaint the lost features from the original's proportions, then derive the smaller sizes.
 
 For simple assets without references, draw directly with `scripts/px.py`: `Grid(n)`, `rect`, `disc`, `tri`, `line`, `put`, `outline`, `write`. Shapes cost fewer decisions than ASCII rows. Draw outline before important small features or protect them with `keep`. Palette format: [palettes.md](references/palettes.md); grid format: [SPEC.md](SPEC.md).
 
