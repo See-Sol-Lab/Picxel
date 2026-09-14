@@ -31,7 +31,6 @@ import io
 import json
 import sys
 import math
-import hashlib
 from html import escape
 from collections import Counter
 from pathlib import Path
@@ -39,7 +38,7 @@ from pathlib import Path
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(errors="replace")   # style questions may be Chinese; a cp936 console must not crash the command
+    sys.stdout.reconfigure(errors="replace")   # paths and notes may be Chinese
 
 SIZES = (32, 64, 128)
 KINDS = ("tile", "item", "sprite")
@@ -62,7 +61,7 @@ def palette_colors(name: str, base: Path | None) -> list[str] | None:
     if name == "custom":
         return None
     path = Path(name)
-    if not path.exists() and not path.is_absolute() and base is not None:
+    if not path.is_absolute() and base is not None:
         path = base / path                          # sheets name their .pal relative to themselves
     if path.suffix == ".pal" and path.exists():
         return [line.strip().lower() for line in path.read_text(encoding="utf-8").splitlines() if line.strip().startswith("#")]
@@ -624,7 +623,7 @@ def concept(pre: Path, anchor: dict, provider: str, out: Path, result: Path | No
     return out
 
 
-def concept_prompt(anchor: dict, style: dict | None = None, mode: str = "original", background: str = "auto") -> str:
+def concept_prompt(anchor: dict, background: str = "auto") -> str:
     framing = ("Opaque square tile, matching opposite edges, no border or centered emblem."
                if anchor["kind"] == "tile" else
                "Single isolated subject on true transparency, entire silhouette visible with a small empty margin.")
@@ -641,19 +640,7 @@ def concept_prompt(anchor: dict, style: dict | None = None, mode: str = "origina
             f"{framing} Keep: {'; '.join(anchor['keep'])}. Omit: {'; '.join(anchor.get('drop', []))}. "
             f"Palette: {', '.join(anchor.get('palette', anchor.get('colors', [])))}; at most 12-16 colors. "
             "Use the original for identity; restore identifying features lost in the mosaic.")
-    if style is None or mode == "original":
-        return prompt
-    instruction = ("Restyle this outlier to match the batch rendering style. The source supplies subject content, "
-                   "not the rendering style. " if mode == "unify" else
-                   "Keep this compatible asset consistent with the shared batch rendering style. ")
-    references = (f"Style reference assets: {', '.join(style['references'])}. "
-                  "Use their approved concept images as style references, keeping the original image as the content reference. "
-                  if style["references"] else "Establish the batch's baseline concept using the shared style and this source. ")
-    return (prompt + "\n\n" + instruction + f"Shared style: {style['profile']} "
-            + references +
-            "Match outline treatment, shading, material rendering, texture density and palette treatment. "
-            "Preserve the source identity, pose, silhouette and all required keep features, including identifying colors. "
-            "Do not copy another asset's subject, costume, anatomy or background. Style consistency does not mean identical hues.")
+    return prompt
 
 
 def smooth_sheet(sheet: Sheet, passes: int, keep: str) -> int:
@@ -699,7 +686,7 @@ def face_prompt(anchor: dict, size: int) -> str:
             "and dark pupils when appropriate; for animal eyes use species-appropriate pupils and catchlights. "
             "Preserve intentional closed eyes, profile views, occlusion and expression; never force two wide-open human eyes. "
             "Clarify mouth pixels only when needed, preserving the original mouth shape and expression. "
-            "Keep head tilt, identity and batch style. "
+            "Keep head tilt, identity and the existing rendering style. "
             "Locate the face again on this final grid: source boxes are not pixel-sheet coordinates. "
             "Use existing palette colors; a free symbol may expose an unused approved light/dark color. "
             "Write a face patch with source, size, optional colors, patches [{face, feature, box, rows, eyes}]. "
@@ -794,52 +781,6 @@ def face_patch(sheet: Sheet, anchor: dict, plan: dict) -> Sheet:
 REF_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp")
 
 
-def batch_style(src_dir: Path, images: dict[str, Path]) -> tuple[dict | None, str]:
-    """The assistant judges style; this file binds its review/choices to the actual images."""
-    if len(images) < 2:
-        return None, ""
-    path = src_dir / "batch.style.json"
-    inputs = {name: {"file": image.name, "sha256": hashlib.sha256(image.read_bytes()).hexdigest()}
-              for name, image in images.items()}
-    if not path.exists():
-        draft = {"profile": "", "references": [], "assets": {
-            name: dict(source, match=None, reason="", choice=None) for name, source in inputs.items()}}
-        path.write_text(json.dumps(draft, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        return None, "Visually review the batch and complete batch.style.json; Python does not classify art style."
-    review = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(review, dict) or not isinstance(review.get("assets"), dict):
-        raise ValueError("batch.style.json must contain an assets object")
-    if set(review["assets"]) != set(inputs):
-        return None, "Batch membership changed; visually review the new batch and update batch.style.json."
-    for name, source in inputs.items():
-        item = review["assets"][name]
-        if not isinstance(item, dict):
-            raise ValueError(f"batch.style.json: {name} must be an object")
-        if any(item.get(k) != v for k, v in source.items()):
-            return None, f"Reference image {name} changed; review it before updating its file/sha256 in batch.style.json."
-        if item.get("match") is None:
-            return None, f"Style review for {name} is incomplete in batch.style.json."
-        if type(item["match"]) is not bool:
-            raise ValueError(f"batch.style.json: {name}.match must be true, false or null")
-        if not isinstance(item.get("reason"), str) or not item["reason"].strip():
-            raise ValueError(f"batch.style.json: {name}.reason must explain the visual assessment")
-        if item.get("choice") not in (None, "original", "unify"):
-            raise ValueError(f"batch.style.json: {name}.choice must be null, original or unify")
-        if item["match"] and item.get("choice") is not None:
-            raise ValueError(f"batch.style.json: compatible asset {name} needs no user choice")
-    profile, references = review.get("profile"), review.get("references")
-    if not isinstance(profile, str) or not isinstance(references, list):
-        raise ValueError("batch.style.json: profile must be text and references must be asset names")
-    if any(not isinstance(name, str) or name not in inputs for name in references):
-        raise ValueError("batch.style.json: references must name assets in this batch")
-    if any(not review["assets"][name]["match"] for name in references):
-        raise ValueError("batch.style.json: style references must be compatible baseline assets")
-    if any(item["match"] or item.get("choice") == "unify" for item in review["assets"].values()):
-        if not profile.strip() or not references:
-            return None, "Choose a baseline style and reference assets before generating a unified batch."
-    return review, ""
-
-
 def review_overview(jobs: list[dict], out_dir: Path) -> list[str]:
     """Four assets per page: concept, then descending sizes at enlarged/native scale."""
     ready = [j for j in jobs if j["status"] == "base-ready"]
@@ -884,10 +825,10 @@ def review_overview(jobs: list[dict], out_dir: Path) -> list[str]:
 
 
 def batch(src_dir: Path, out_dir: Path, provider: str, sizes: list[int] | None, concept_dir: Path | None = None,
-          concept_background: str = "auto", only: list[str] | None = None, style_check: bool = True) -> int:
+          concept_background: str = "auto", only: list[str] | None = None) -> int:
     """One directory = one batch. Every <name>.anchor.json + sibling image becomes a base sheet
     (mosaic -> concept -> palette -> import -> smooth -> check -> render). The model-side
-    erase-and-paint pass happens afterwards, per sheet, in queue or parallel mode -- never here."""
+    erase-and-paint pass happens afterwards only where visual review requires it -- never here."""
     anchors = sorted(src_dir.glob("*.anchor.json"))
     if not anchors:
         print(f"no *.anchor.json in {src_dir}")
@@ -899,11 +840,7 @@ def batch(src_dir: Path, out_dir: Path, provider: str, sizes: list[int] | None, 
     images = {}
     for apath in anchors:
         stem = apath.name[:-len(".anchor.json")]
-        image = next((apath.with_name(stem + ext) for ext in REF_SUFFIXES if apath.with_name(stem + ext).exists()), None)
-        if image is not None:
-            images[stem] = image
-    # Style review is opt-in (CLI --style-check / the panel checkbox); by default each asset is drawn as it is.
-    style, style_problem = batch_style(src_dir, images) if style_check else (None, "")
+        images[stem] = [apath.with_name(stem + ext) for ext in REF_SUFFIXES if apath.with_name(stem + ext).exists()]
     jobs, failed = [], 0
     for apath in anchors:
         stem = apath.name[:-len(".anchor.json")]
@@ -916,38 +853,19 @@ def batch(src_dir: Path, out_dir: Path, provider: str, sizes: list[int] | None, 
             anchor = load_anchor(apath)
             if sizes:
                 anchor = dict(anchor, size=max(sizes))
-            image = images.get(stem)
-            if image is None:
+            candidates = images[stem]
+            if not candidates:
                 raise FileNotFoundError(f"no reference image {stem}.png/.jpg next to the anchor")
-            if style_problem:
-                job["status"] = "needs-style-review"
-                job["problems"].append(style_problem)
-                continue
-            mode = "original"
-            if style is not None:
-                assessment = style["assets"][stem]
-                mode = "matched" if assessment["match"] else assessment["choice"]
-                job["style"] = {"mode": mode, "reason": assessment["reason"]}
-                if mode is None:
-                    job["status"] = "needs-style-choice"
-                    job["question"] = f"{stem} 与这批素材的画风差异较大：{assessment['reason']}。保留原图风格，还是统一到这批画风？"
-                    job["choices"] = [{"value": "original", "label": "保留原图风格"},
-                                      {"value": "unify", "label": "统一画风"}]
-                    job["problems"].append("Await the user's choice in batch.style.json; do not generate this asset yet.")
-                    continue
-                if mode != "original":
-                    references = style["references"]
-                    # Establish the first baseline before referring to it; avoid
-                    # asking two not-yet-generated baseline concepts to reference each other.
-                    job["style_references"] = references[:references.index(stem)] if stem in references else references
+            if len(candidates) != 1:
+                raise ValueError(f"multiple reference images named {stem}; give them distinct names before generating")
+            image = candidates[0]
             pre = out_dir / f"{stem}.pre.png"
             prompt = out_dir / f"{stem}.prompt.txt"
-            prompt_style = dict(style, references=job.get("style_references", [])) if style is not None else None
-            prompt.write_text(concept_prompt(anchor, prompt_style, mode, concept_background), encoding="utf-8")
+            prompt.write_text(concept_prompt(anchor, background=concept_background), encoding="utf-8")
             job["prompt"] = prompt.name
-            concept_name = f"{stem}.unified.png" if mode == "unify" else f"{stem}.png"
+            concept_name = f"{stem}.png"
             job["concept_file"] = concept_name
-            needs_concept = provider != "none" or mode == "unify"
+            needs_concept = provider != "none"
             result = concept_dir / concept_name if concept_dir and needs_concept else None
             have_concept = result is not None and result.exists()
             if not needs_concept or not have_concept:
@@ -1002,22 +920,14 @@ def batch(src_dir: Path, out_dir: Path, provider: str, sizes: list[int] | None, 
     report_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     todo = [j for j in jobs if j["status"] == "base-ready"]
     print(f"batch{' subset' if only is not None else ''}: {len(jobs)} jobs, {len(todo)} base sheets ready, {failed} failed -> {report_path}")
-    if style_problem:
-        print(style_problem)
     for j in jobs:
-        mark = {"base-ready": "+", "needs-style-review": "?", "needs-style-choice": "?",
+        mark = {"base-ready": "+",
                 "needs-concept": "?", "check-failed": "!", "failed": "x"}[j["status"]]
         if j["status"] == "needs-concept":
             detail = f"prompt={j['prompt']}; save={j['concept_file']}"
-            if j.get("style_references"):
-                detail += "; style refs=" + ",".join(j["style_references"])
-        elif j["status"] == "needs-style-review":
-            detail = "needs-style-review"
         else:
             detail = ", ".join(j["sheets"]) or j["problems"][0]
         print(f"  {mark} {j['name']}: {detail}")
-        if "question" in j:
-            print(f"    {j['question']}")
         for face in j.get("face_review", []):
             if face["status"] == "needs-face-review":
                 print(f"    face review: {face['sheet']} -> {face['prompt']}")
@@ -1176,8 +1086,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--concept-dir", type=Path, help="assistant-produced <name>.png concepts; missing results are reported as needs-concept")
     p.add_argument("--concept-background", default="auto", help="concept background: auto | none | key:#rrggbb")
     p.add_argument("--sizes", help="comma list overriding each anchor's size, e.g. 128,64,32")
-    p.add_argument("--style-check", action="store_true", help="multi-image batches: review art-style consistency first (off by default)")
-    p.add_argument("--only", nargs="+", help="process only these asset names; still use the full batch's style review")
+    p.add_argument("--only", nargs="+", help="process only these asset names")
     a = ap.parse_args(argv)
 
     if a.cmd in ("check", "render"):
@@ -1292,7 +1201,7 @@ def main(argv: list[str] | None = None) -> int:
         sizes = [int(v) for v in a.sizes.split(",")] if a.sizes else None
         if sizes and any(v not in SIZES for v in sizes):
             print(f"--sizes must come from {SIZES}"); return 2
-        return batch(a.dir, a.out or a.dir / "base", a.provider, sizes, a.concept_dir, a.concept_background, a.only, a.style_check)
+        return batch(a.dir, a.out or a.dir / "base", a.provider, sizes, a.concept_dir, a.concept_background, a.only)
     if a.cmd == "smooth":
         failed = 0
         for f in a.files:

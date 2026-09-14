@@ -28,13 +28,11 @@ button.primary:hover{filter:brightness(1.1)}
 .seg{display:inline-flex;background:var(--btn);border-radius:10px;padding:3px}
 .seg button{border:0;background:transparent;padding:6px 12px;border-radius:8px}
 .seg button.on{background:var(--accent);color:#fff}
-label.chk{display:flex;gap:8px;align-items:flex-start;color:var(--fg);cursor:pointer}
-label.chk input{margin-top:3px}
-label.chk small{display:block;color:var(--dim)}
-.hint{margin-top:auto;background:var(--bg);border:1px dashed var(--line);border-radius:12px;padding:16px;text-align:center;color:var(--dim);line-height:1.7}
+.hint{margin-top:0;background:var(--bg);border:1px dashed var(--line);border-radius:12px;padding:16px;text-align:center;color:var(--dim);line-height:1.7}
 .hint b{color:var(--fg);display:block;font-size:15px;margin-bottom:4px}
 .hint.live{border-color:var(--accent)}
 .err{color:var(--bad);font-size:12px;min-height:18px}
+.err:empty{display:none}
 .center{height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;color:var(--dim);text-align:center}
 .spin{width:54px;height:54px;border:5px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:r 1s linear infinite}
 @keyframes r{to{transform:rotate(360deg)}}
@@ -63,14 +61,6 @@ label.chk small{display:block;color:var(--dim)}
 details.warn{margin-top:8px;font-size:12px;color:var(--dim)}
 details.warn summary{cursor:pointer;color:var(--warn)}
 details.warn li{margin:2px 0}
-/* style review questions */
-.ask{background:var(--card);border:1px solid var(--warn);border-radius:12px;padding:14px 16px;margin-bottom:22px}
-.ask h3{margin:0 0 6px;font-size:14px;color:var(--warn)}
-.ask .q{display:flex;gap:14px;align-items:center;padding:10px 0;border-top:1px solid var(--line);flex-wrap:wrap}
-.ask .q:first-of-type{border-top:0}
-.ask .q img{width:64px;height:64px;object-fit:contain;border-radius:8px;background:var(--check2)}
-.ask .q .why{flex:1;min-width:200px;color:var(--dim);font-size:13px}
-.ask .q .why b{color:var(--fg)}
 /* compare overlay */
 .overlay{position:fixed;inset:0;background:var(--overlay);display:flex;flex-direction:column;z-index:9}
 .overlay .bar{display:flex;gap:12px;align-items:center;padding:14px 20px;flex-wrap:wrap}
@@ -125,9 +115,6 @@ kbd{font:11px/1 ui-monospace,monospace;color:var(--dim);border:1px solid var(--l
       <span class="seg"><button id="modeSingle" class="on">单张</button><button id="modeBatch">批量（≤20）</button></span>
       <span class="seg" id="sizes"><button data-s="32">32</button><button data-s="64" class="on">64</button><button data-s="128">128</button></span>
     </div>
-    <div style="height:10px"></div>
-    <label class="chk"><input type="checkbox" id="styleCheck" disabled><span>画风鉴定<small>批量导入前 AI 先看一遍画风，差得远的问你要不要统一</small></span></label>
-    <label class="chk"><input type="checkbox" id="parallel" disabled><span>子智能体并行<small>AI 开一批子智能体同时画：快，但更贵、更不精确。默认逐张画。</small></span></label>
   </div>
 
   <div class="err" id="err"></div>
@@ -155,39 +142,59 @@ function pathLine(el,full,fallback,extra){
   el.querySelector(".copy").onclick=async e=>{try{await navigator.clipboard.writeText(norm);e.target.textContent="已复制";setTimeout(()=>e.target.textContent="复制",1200)}catch{err("复制失败，请手动选中路径")}};
 }
 function refreshSide(){
+  $("#pickFiles").textContent=ui.mode==="batch"&&ui.files.length?"继续添加图片":"选择图片";
   pathLine($("#importPath"),ui.import,"单张选一张，批量可以多选（≤20）",ui.files.length>1?`（${ui.files.length} 张）`:ui.files.length===1?`（${ui.files[0]}）`:"");
   pathLine($("#exportPath"),ui.export,"默认为导入位置下的 picxel-out","");
   $("#modeSingle").classList.toggle("on",ui.mode==="single");$("#modeBatch").classList.toggle("on",ui.mode==="batch");
   document.querySelectorAll("#sizes button").forEach(b=>b.classList.toggle("on",ui.sizes.includes(+b.dataset.s)));
-  $("#styleCheck").disabled=$("#parallel").disabled=ui.mode!=="batch";
   $("#newJob").hidden=!ui.saved;
   const st=last&&last.job?last.status.state:null, h=$("#hint");
+  const busy=st==="running"||st==="asking";
+  document.querySelectorAll("#pickFiles,#pickExport,#modeSingle,#modeBatch,#sizes button").forEach(b=>b.disabled=busy);
   h.classList.toggle("live",st==="running"||st==="asking");
   if(!ui.import)h.innerHTML="<b>选好图片和导出位置后</b>请与 AI 对话开始生图";
-  else if(st==="running")h.innerHTML="<b>AI 正在画</b>改动这里的设置不会影响正在进行的这批";
+  else if(st==="running")h.innerHTML="<b>AI 正在画</b>当前设置已锁定，可在任务结束后调整";
   else if(st==="asking")h.innerHTML="<b>AI 在等你</b>看右边的问题，选好后在对话里说“继续”";
   else if(st==="done"||st==="interrupted")h.innerHTML="<b>这批已结束</b>想再画：点下面「新任务」，或直接换导入位置";
   else h.innerHTML="<b>位置已就绪</b>请与 AI 对话开始生图<br><span style='font-size:12px'>例如：“按面板的设置开始画”</span>";
 }
-async function save(){
-  if(!ui.import)return;
-  err("");
-  const r=await api("/api/job",{import:ui.import,export:ui.export||ui.import+"/picxel-out",mode:ui.mode,files:ui.files,sizes:ui.sizes,
-    style_check:$("#styleCheck").checked,parallel:$("#parallel").checked});
-  if(r.error){err(r.error);return}
-  ui.saved=r.job;refreshSide();poll();
+function mergePickedImages(current,paths){
+  if(!paths.length)return {import:current.import,files:[...current.files]};
+  const selected=(current.mode==="single"?paths.slice(0,1):paths).map(p=>p.replace(/\\/g,"/"));
+  const folder=selected[0].slice(0,selected[0].lastIndexOf("/"));
+  const windows=/^(?:[a-z]:\/|\/\/)/i.test(folder), key=s=>windows?s.toLowerCase():s;
+  if(selected.some(p=>key(p.slice(0,p.lastIndexOf("/")))!==key(folder)))throw Error("同一批图片请放在同一个文件夹中，已选列表保持不变。");
+  const append=current.mode==="batch"&&current.files.length>0;
+  if(append&&key(current.import.replace(/\\/g,"/"))!==key(folder))throw Error("这批图片来自另一个文件夹。请把素材放到同一文件夹，或点「新任务」重新选择；已选列表保持不变。");
+  const files=[],seen=new Set();
+  for(const name of [...(append?current.files:[]),...selected.map(p=>p.slice(p.lastIndexOf("/")+1))]){
+    if(!seen.has(key(name))){seen.add(key(name));files.push(name)}
+  }
+  if(files.length>20)throw Error("每批最多 20 张图片，已选列表保持不变。");
+  return {import:append?current.import:folder,files};
 }
-$("#pickFiles").onclick=async()=>{const r=await api("/api/pick",{kind:ui.mode==="single"?"file":"files"});if(r.error)return err(r.error);
-  if(r.paths.length){const p=r.paths[0].replace(/\\/g,"/");ui.import=p.slice(0,p.lastIndexOf("/"));ui.files=r.paths.map(x=>x.replace(/\\/g,"/").split("/").pop());save()}};
+async function save(selection={}){
+  const selected={...ui,...selection};
+  if(!selected.import)return;
+  err("");
+  const r=await api("/api/job",{import:selected.import,export:ui.export||selected.import+"/picxel-out",mode:ui.mode,files:selected.files,sizes:ui.sizes});
+  if(r.error){err(r.error);return}
+  Object.assign(ui,selection);ui.files=r.job.files;ui.saved=r.job;refreshSide();poll();
+}
+$("#pickFiles").onclick=async()=>{
+  const button=$("#pickFiles");button.disabled=true;
+  try{const r=await api("/api/pick",{kind:ui.mode==="single"?"file":"files"});if(r.error)return err(r.error);
+    if(r.paths.length)await save(mergePickedImages(ui,r.paths));
+  }catch(e){err(e.message)}finally{button.disabled=!!last&&["running","asking"].includes(last.status?.state)}
+};
 $("#pickExport").onclick=async()=>{const r=await api("/api/pick",{kind:"dir"});if(r.error)return err(r.error);if(r.paths[0]){ui.export=r.paths[0];save()}};
 $("#modeSingle").onclick=()=>{ui.mode="single";save();refreshSide()};
 $("#modeBatch").onclick=()=>{ui.mode="batch";save();refreshSide()};
 document.querySelectorAll("#sizes button").forEach(b=>b.onclick=()=>{const s=+b.dataset.s;ui.sizes=ui.sizes.includes(s)?ui.sizes.filter(x=>x!==s):[...ui.sizes,s].sort((a,b)=>a-b);if(!ui.sizes.length)ui.sizes=[64];save();refreshSide()});
-$("#styleCheck").onchange=$("#parallel").onchange=save;
 $("#newJob").onclick=async()=>{
   if(last&&last.status.state==="running"&&!confirm("AI 还在画这批。清空设置不会停止它，只是面板不再显示这批。继续？"))return;
   await api("/api/clear");ui={import:"",export:"",files:[],mode:"single",sizes:[64],saved:null};
-  $("#styleCheck").checked=$("#parallel").checked=false;last=null;refreshSide();render({job:null});
+  last=null;refreshSide();render({job:null});
 };
 
 // ---------- main
@@ -195,7 +202,6 @@ function fmt(sec){sec=Math.floor(sec||0);return sec<60?`${sec} 秒`:sec<3600?`${
 function clock(iso){if(!iso)return"";const d=new Date(iso);return d.toLocaleTimeString("zh-CN",{hour:"2-digit",minute:"2-digit"})}
 const orderedSizes=st=>[...st.job.sizes].sort((a,b)=>b-a);
 const downloadLink=url=>`<a class="download" href="${esc(url)}&amp;download=1" download>下载</a>`;
-const STYLE_LABEL={original:"保留原图风格",unify:"统一画风"};
 
 // Single-image presentation uses delivered pixels, never invented model strokes.
 let single=null;
@@ -274,27 +280,8 @@ function playSingle(current){
   current.frame=requestAnimationFrame(tick);
 }
 
-function styleBlock(st){
-  if(!st.style||!st.style.length)return"";
-  let h=`<div class="ask"><h3>画风鉴定 · ${st.style.filter(q=>!q.choice).length?"有几张需要你决定":"已决定"}</h3>`;
-  for(const q of st.style){
-    const pick=q.choice?`<span class="tag ok">已选：${STYLE_LABEL[q.choice]}</span> <button class="mini" data-style="${esc(q.name)}" data-choice="">改</button>`
-      :`<button class="primary" data-style="${esc(q.name)}" data-choice="original">保留原图风格</button><button data-style="${esc(q.name)}" data-choice="unify">统一画风</button>`;
-    h+=`<div class="q"><img src="${st.originals[q.name]||""}"><div class="why"><b>${esc(q.name)}</b> 与这批的画风差别较大<br>${esc(q.reason)}</div><div class="row">${pick}</div></div>`;
-  }
-  return h+`</div>`;
-}
-function bindStyle(){
-  document.querySelectorAll("[data-style]").forEach(b=>b.onclick=async()=>{
-    const name=b.dataset.style, choice=b.dataset.choice;
-    if(!choice){const q=last.style.find(x=>x.name===name);if(q)q.choice=null;render(last);return}   // "改": show the two buttons again
-    const r=await api("/api/style",{name,choice});if(r.error)return err(r.error);poll();
-  });
-}
 function assetBlock(st,name,r){
   const tags=[];
-  if(r.style&&r.style.mode==="unify")tags.push(`<span class="tag">统一画风</span>`);
-  if(r.style&&r.style.mode==="original"&&st.style&&st.style.some(q=>q.name===name))tags.push(`<span class="tag">保留原图风格</span>`);
   if(r.faces&&r.faces.length)tags.push(`<span class="tag warn">面部待修 · ${r.faces.length}</span>`);
   if(r.errors&&r.errors.length)tags.push(`<span class="tag bad">底稿失败</span>`);
   let h=`<div class="asset"><div class="head"><span class="name">${esc(name)}</span>${tags.join("")}<a class="original-link" href="${esc(st.originals[name])}" target="_blank" rel="noopener">查看原图</a></div><div class="strip">`;
@@ -320,23 +307,21 @@ function render(st){
   let html=st.import_missing?`<div class="notice">导入文件夹不在了：${esc(st.job.import)}。成品还能看，原图显示不出来。</div>`:"";
   if(s==="waiting"){
     html+=`<div class="banner"><span class="pill">已记录 ${st.total} 张 · ${st.job.mode==="single"?"单张":"批量"} · ${st.job.sizes.join(" / ")}</span><span class="pill">等 AI 开始</span></div>`;
-    html+=styleBlock(st);
     html+=`<div class="strip">`+Object.keys(st.results).map(n=>`<div class="card orig empty"><div class="t">${esc(n)}</div><div class="img"><img src="${st.originals[n]}"></div></div>`).join("")+`</div>`;
-    m.innerHTML=html;bindStyle();refreshSide();return}
+    m.innerHTML=html;refreshSide();return}
   if(s==="running"){
     const stall=st.status.looks_stalled?`<div style="color:var(--warn)">${fmt(st.idle)} 没有新文件了——AI 可能停了（用量、网络或别的）。可以继续等，或者<button id="stopBtn" style="margin-left:6px">结束等待，看已完成的</button></div>`:"";
     if(st.job.mode==="single"){
       const [name,r]=singleResult(st);
       m.innerHTML=html+`<div id="singleHost"></div>`+stall+((r.concept||Object.keys(r.sizes).length)?assetBlock(st,name,r):"");mountSingle(st);
       document.querySelectorAll("[data-open]").forEach(c=>c.onclick=e=>{if(!e.target.closest("a"))openCompare(c.dataset.open)});
-    }else m.innerHTML=html+styleBlock(st)+`<div class="center"><div class="spin"></div><div>AI 正在画 · 已用 ${fmt(st.elapsed)}</div><div>${st.done} / ${st.total} 张已有结果</div>${stall}</div>`;
+    }else m.innerHTML=html+`<div class="center"><div class="spin"></div><div>AI 正在画 · 已用 ${fmt(st.elapsed)}</div><div>${st.done} / ${st.total} 张已有结果</div>${stall}</div>`;
     const b=$("#stopBtn");if(b)b.onclick=()=>api("/api/stop").then(poll);
-    bindStyle();refreshSide();return}
+    refreshSide();return}
   if(s==="asking"){
     // the assistant stopped for a human decision: no spinner, the question first, then what exists so far
     html+=`<div class="banner"><span class="pill warn">AI 在等你决定</span>${st.status.note?`<span class="pill">${esc(st.status.note)}</span>`:""}<span class="pill">已用 ${fmt(st.elapsed)} · ${st.done} / ${st.total} 张已有结果</span></div>`;
-    html+=styleBlock(st);
-    html+=`<div class="notice">选好之后回到对话里说一声“继续”，AI 接着画。</div>`;
+    html+=`<div class="notice">请在对话里回复，AI 再继续生成。</div>`;
   }else{
     // done / interrupted: cards for what exists, honest line for what doesn't
     const ok=s==="done";
@@ -344,11 +329,10 @@ function render(st){
     if(st.status.note)html+=`<span class="pill">${esc(st.status.note)}</span>`;
     if(st.elapsed!=null)html+=`<span class="pill">用时 ${fmt(st.elapsed)}${st.status.finished?" · "+clock(st.status.finished)+" 结束":""}</span>`;
     html+=`<button id="openBtn">打开成品图</button><a class="button-link" href="/api/download" download>下载全部图片</a></div>`;
-    html+=styleBlock(st);
   }
   if(st.job.mode==="single")html+=`<div id="singleHost"></div>`;
   for(const [name,r] of Object.entries(st.results))html+=assetBlock(st,name,r);
-  m.innerHTML=html;const ob=$("#openBtn");if(ob)ob.onclick=async()=>{const r=await api("/api/open",{which:"export"});if(r.error)err(r.error)};bindStyle();
+  m.innerHTML=html;const ob=$("#openBtn");if(ob)ob.onclick=async()=>{const r=await api("/api/open",{which:"export"});if(r.error)err(r.error)};
   if(st.job.mode==="single")mountSingle(st);
   document.querySelectorAll("[data-open]").forEach(c=>c.onclick=e=>{if(!e.target.closest("a"))openCompare(c.dataset.open)});
   refreshSide();
@@ -386,8 +370,8 @@ let lastKey="";
 async function poll(){
   try{const st=await (await fetch("/api/state")).json();
     const key=JSON.stringify(st);if(key===lastKey)return;lastKey=key;      // redraw only when something changed
-    if(st.job&&!ui.saved){ui={import:st.job.import,export:st.job.export,files:st.job.files,mode:st.job.mode,sizes:st.job.sizes,saved:st.job};
-      $("#styleCheck").checked=st.job.style_check;$("#parallel").checked=st.job.parallel}
+    if(st.job&&(!ui.saved||st.job.created!==ui.saved.created)){ui={import:st.job.import,export:st.job.export,files:st.job.files,mode:st.job.mode,sizes:st.job.sizes,saved:st.job};}
+    if(!st.job&&ui.saved)ui={import:"",export:"",files:[],mode:"single",sizes:[64],saved:null};
     if(view.asset){last=st;drawCompare();refreshSide()}else render(st)}catch(e){}
 }
 refreshSide();poll();setInterval(poll,2000);

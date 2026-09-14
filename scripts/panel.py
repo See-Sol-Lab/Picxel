@@ -4,8 +4,6 @@ assets go, watch one spinner while the assistant works in chat, then see the res
 The panel never drives the assistant. It writes one job file the assistant reads
 (`picxel job show`), and reads back the status file the assistant updates
 (`picxel job start|done|stop`), the batch report and whatever PNGs land in the export folder.
-The one thing a human answers on the page -- keep an outlier's own style or unify it -- is
-written into batch.style.json, where `batch --style-check` already expects it.
 Standard library only: http.server for the page, tkinter for the native folder dialogs."""
 from __future__ import annotations
 
@@ -32,15 +30,12 @@ IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp")
 JOB_FILE = Path.home() / ".picxel" / "current-job.json"
 STATUS_NAME = "picxel.status.json"
 REPORT_NAME = "batch-report.json"       # written by `picxel batch` into the export folder
-STYLE_NAME = "batch.style.json"         # written by `picxel batch --style-check` next to the reference images
 FINISHED_DIR = "成品图"
 IDLE_SECONDS = 240          # no new file in the export folder for this long while "running" -> looks interrupted
 PANEL_HTML = Path(__file__).with_name("panel.html")
 
 # What the page says about a size that has no finished PNG yet, keyed by the batch report status.
 MISSING_REASON = {
-    "needs-style-review": "等 AI 完成画风鉴定",
-    "needs-style-choice": "等你选画风（见上方）",
     "needs-concept": "等效果图",
     "check-failed": "底稿没过校验",
     "failed": "底稿失败",
@@ -49,7 +44,7 @@ MISSING_REASON = {
 
 
 def now() -> str:
-    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+    return datetime.now(timezone.utc).astimezone().isoformat(timespec="microseconds")
 
 
 def read_json(path: Path, default):
@@ -69,12 +64,17 @@ def load_job() -> dict | None:
 
 def save_job(job: dict) -> dict:
     """Validate the panel's choices and write the job file the assistant will read."""
+    current = load_job()
+    if current and load_status(Path(current["export"]))["state"] in ("running", "asking"):
+        raise ValueError("当前任务尚未结束，请先结束等待或新建任务，再修改设置。")
     problems = []
     src, dst = Path(job.get("import") or ""), Path(job.get("export") or "")
-    if not src.is_dir():
+    if not job.get("import") or not src.is_dir():
         problems.append("import folder does not exist")
-    if not str(dst):
+    if not job.get("export"):
         problems.append("export folder is empty")
+    elif dst.exists() and not dst.is_dir():
+        problems.append("export path must be a folder")
     mode = job.get("mode")
     if mode not in ("single", "batch"):
         problems.append("mode must be single or batch")
@@ -83,6 +83,13 @@ def save_job(job: dict) -> dict:
         files = sorted(p.name for p in src.iterdir() if p.suffix.lower() in IMAGE_SUFFIXES)
     if mode == "single":
         files = files[:1]
+    files = list(dict.fromkeys(files))
+    if any(Path(f).name != f or Path(f).suffix.lower() not in IMAGE_SUFFIXES or
+           not (src / f).is_file() or (src / f).resolve().parent != src.resolve() for f in files):
+        problems.append("selected images must exist inside the import folder")
+    stems = [os.path.normcase(Path(f).stem) for f in files]
+    if len(stems) != len(set(stems)):
+        problems.append("selected images must have distinct names before their extensions")
     if not files:
         problems.append("no images selected")
     if len(files) > BATCH_LIMIT:
@@ -92,14 +99,12 @@ def save_job(job: dict) -> dict:
         raise ValueError("; ".join(problems))
     clean = {
         "import": str(src), "export": str(dst), "mode": mode, "files": files, "sizes": sizes,
-        "style_check": bool(job.get("style_check")) and mode == "batch",
-        "parallel": bool(job.get("parallel")) and mode == "batch",
         "created": now(),
     }
-    JOB_FILE.parent.mkdir(parents=True, exist_ok=True)
-    JOB_FILE.write_text(json.dumps(clean, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     dst.mkdir(parents=True, exist_ok=True)
     (dst / STATUS_NAME).write_text(json.dumps({"state": "waiting", "updated": now(), "note": ""}, indent=2) + "\n", encoding="utf-8")
+    JOB_FILE.parent.mkdir(parents=True, exist_ok=True)
+    JOB_FILE.write_text(json.dumps(clean, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return clean
 
 
@@ -127,7 +132,7 @@ def set_status(export: Path, state: str, note: str = "") -> dict:
     current = load_status(export)
     # `asking`: the assistant stopped for a human decision. Resuming with `running` keeps the
     # original start time, so the elapsed clock covers the whole batch.
-    started = current.get("started") if state == "asking" or (state == "running" and current.get("state") == "asking") else None
+    started = current.get("started") if state == "asking" or (state == "running" and current.get("state") in ("running", "asking")) else None
     status = {"state": state, "updated": now(), "note": note,
               "started": started or (now() if state == "running" else current.get("started")),
               "finished": now() if state in ("done", "interrupted") else None}
@@ -145,17 +150,27 @@ def image_url(name: str) -> str:
     return "/file?" + urlencode({"root": "export", "path": name})
 
 
+def current_output(job: dict, path: Path) -> bool:
+    """Only files produced since these settings were saved belong to this job."""
+    return path.is_file() and path.stat().st_mtime >= datetime.fromisoformat(job["created"]).timestamp()
+
+
+def completed_image(job: dict, native: Path, preview: Path) -> bool:
+    return (current_output(job, native) and current_output(job, preview)
+            and preview.stat().st_mtime >= native.stat().st_mtime)
+
+
 def deliverable_images(job: dict) -> list[tuple[Path, str]]:
     """Only completed native PNGs and background-removed concepts; no work files/previews."""
     export = Path(job["export"])
     files = []
     for stem in dict.fromkeys(Path(f).stem for f in job["files"]):
         concept = export / f"{stem}.concept.png"
-        if concept.is_file():
+        if current_output(job, concept):
             files.append((concept, f"{stem}-效果图.png"))
         for size in sorted(set(job["sizes"]), reverse=True):
             native = export / f"{stem}-{size}.png"
-            if native.is_file() and (export / f"{stem}-{size}@4x.png").is_file():
+            if completed_image(job, native, export / f"{stem}-{size}@4x.png"):
                 files.append((native, native.name))
     if any(export.resolve() not in source.resolve().parents for source, _ in files):
         raise ValueError("deliverable images must stay inside the export folder")
@@ -192,7 +207,7 @@ def scan_results(job: dict) -> dict:
     the page displays the native PNG so CSS can scale it to any zoom without blur."""
     export = Path(job["export"])
     stems = [Path(f).stem for f in job["files"]]
-    report = load_report(export)
+    report = load_report(export) if current_output(job, export / REPORT_NAME) else {}
     results, newest = {}, 0.0
     if export.is_dir():
         for p in export.iterdir():
@@ -202,10 +217,9 @@ def scan_results(job: dict) -> dict:
         sizes = {}
         for size in job["sizes"]:
             preview, native = export / f"{stem}-{size}@4x.png", export / f"{stem}-{size}.png"
-            if preview.exists():
-                shown = native if native.exists() else preview
-                sizes[str(size)] = {"png": image_url(shown.name), "x4": image_url(preview.name),
-                                    "updated": shown.stat().st_mtime}
+            if completed_image(job, native, preview):
+                sizes[str(size)] = {"png": image_url(native.name), "x4": image_url(preview.name),
+                                    "updated": native.stat().st_mtime}
         entry = report.get(stem, {})
         problems = entry.get("problems", [])
         warnings = [p.replace("(warn) ", "") for p in problems if "(warn)" in p]
@@ -216,45 +230,12 @@ def scan_results(job: dict) -> dict:
             missing += "：" + errors[0]
         faces = [f["sheet"] for f in entry.get("face_review", []) if f.get("status") == "needs-face-review"]
         concept = export / f"{stem}.concept.png"
-        results[stem] = {"sizes": sizes, "concept": image_url(concept.name) if concept.is_file() else None,
-                         "concept_updated": concept.stat().st_mtime if concept.is_file() else None,
+        results[stem] = {"sizes": sizes, "concept": image_url(concept.name) if current_output(job, concept) else None,
+                         "concept_updated": concept.stat().st_mtime if current_output(job, concept) else None,
                          "status": status, "missing": missing, "warnings": warnings,
-                         "errors": errors, "faces": faces, "style": entry.get("style")}
+                         "errors": errors, "faces": faces}
     return {"results": results, "newest": newest,
-            "done": sum(1 for s in stems if results[s]["sizes"]), "total": len(stems)}
-
-
-# ---------------------------------------------------------------- style review: the one question a human answers here
-
-def style_questions(import_dir: Path, stems: list[str]) -> list[dict]:
-    """Outliers from batch.style.json that belong to this job, with whatever the user already chose."""
-    review = read_json(import_dir / STYLE_NAME, {})
-    assets = review.get("assets", {}) if isinstance(review, dict) else {}
-    out = []
-    for name in stems:
-        a = assets.get(name)
-        if isinstance(a, dict) and a.get("match") is False:
-            out.append({"name": name, "reason": a.get("reason") or "", "choice": a.get("choice")})
-    return out
-
-
-def set_style_choice(import_dir: Path, name: str, choice: str) -> dict:
-    """Record the human's answer for one outlier. Only `original` / `unify`, only for an asset the
-    assistant marked as an outlier -- the same rules `batch` enforces when it reads the file."""
-    if choice not in ("original", "unify"):
-        raise ValueError("choice must be original or unify")
-    path = import_dir / STYLE_NAME
-    review = read_json(path, None)
-    if not isinstance(review, dict) or not isinstance(review.get("assets"), dict):
-        raise ValueError("no style review yet -- ask the AI to run the style check first")
-    asset = review["assets"].get(name)
-    if not isinstance(asset, dict):
-        raise ValueError(f"{name} is not in the style review")
-    if asset.get("match") is not False:
-        raise ValueError(f"{name} matches the batch style; nothing to choose")
-    asset["choice"] = choice
-    path.write_text(json.dumps(review, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    return {"name": name, "choice": choice}
+            "done": sum(all(str(n) in results[s]["sizes"] for n in job["sizes"]) for s in stems), "total": len(stems)}
 
 
 # ---------------------------------------------------------------- what the page polls
@@ -278,7 +259,9 @@ def state_payload() -> dict:
     idle = None
     elapsed = None
     if status.get("state") == "running":
-        last = scan["newest"] or (datetime.fromisoformat(status["started"]).timestamp() if status.get("started") else 0)
+        # Reusing an export folder must not carry old PNG inactivity into a new run.
+        started = datetime.fromisoformat(status["started"]).timestamp() if status.get("started") else 0
+        last = max(scan["newest"], started)
         idle = max(0, datetime.now().timestamp() - last) if last else 0
         if idle > IDLE_SECONDS:
             status = dict(status, looks_stalled=True)
@@ -289,13 +272,9 @@ def state_payload() -> dict:
     elif status.get("state") == "asking":
         elapsed = _seconds_since(status.get("started"))
     stems = [Path(f).stem for f in job["files"]]
-    originals = {Path(f).stem: f"/file?root=import&path={f}" for f in job["files"]}
-    style = style_questions(Path(job["import"]), stems) if job.get("style_check") else []
-    if status.get("state") == "running" and any(q["choice"] is None for q in style):
-        # The assistant is blocked on the human even if it forgot to say so: no spinner, show the question.
-        status = dict(status, state="asking", looks_stalled=False, note=status.get("note") or "有素材等你选画风")
+    originals = {Path(f).stem: "/file?" + urlencode({"root": "import", "path": f}) for f in job["files"]}
     return {"job": job, "status": status, "originals": originals, "idle": idle, "elapsed": elapsed,
-            "style": style, "import_missing": not Path(job["import"]).is_dir(), **scan}
+            "import_missing": not Path(job["import"]).is_dir(), **scan}
 
 
 # ---------------------------------------------------------------- native dialogs / opening folders
@@ -355,6 +334,16 @@ def open_folder(path: Path) -> None:
 # ---------------------------------------------------------------- http
 
 class Handler(BaseHTTPRequestHandler):
+    def parse_request(self):
+        if not super().parse_request():
+            return False
+        hosts = {f"127.0.0.1:{self.server.server_port}", f"localhost:{self.server.server_port}"}
+        origin = self.headers.get("Origin")
+        if self.headers.get("Host") not in hosts or (origin and origin not in {"http://" + h for h in hosts}):
+            self.send_error(403, "Local panel requests only")
+            return False
+        return True
+
     def log_message(self, *_):                         # keep the console quiet
         pass
 
@@ -367,8 +356,13 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _body(self) -> dict:
+        if self.headers.get_content_type() != "application/json":
+            raise ValueError("request body must be application/json")
         n = int(self.headers.get("Content-Length") or 0)
-        return json.loads(self.rfile.read(n) or b"{}")
+        body = json.loads(self.rfile.read(n) or b"{}")
+        if not isinstance(body, dict):
+            raise ValueError("request body must be a JSON object")
+        return body
 
     def do_GET(self):
         url = urlparse(self.path)
@@ -400,7 +394,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error(404); return
             base = Path(job[root]).resolve()
             target = (base / q.get("path", [""])[0]).resolve()
-            if base not in target.parents or not target.is_file():
+            if base not in target.parents or not target.is_file() or target.suffix.lower() not in IMAGE_SUFFIXES:
                 self.send_error(404); return            # only files inside the two chosen folders
             data = target.read_bytes()
             self.send_response(200)
@@ -423,19 +417,15 @@ class Handler(BaseHTTPRequestHandler):
             elif url.path == "/api/job":
                 self._json({"job": save_job(self._body())})
             elif url.path == "/api/clear":
+                self._body()
                 clear_job()
                 self._json({"ok": True})
             elif url.path == "/api/stop":
+                self._body()
                 job = load_job()
                 if job is None:
                     raise ValueError("no job")
                 self._json({"status": set_status(Path(job["export"]), "interrupted", "面板上手动结束等待")})
-            elif url.path == "/api/style":
-                job = load_job()
-                if job is None:
-                    raise ValueError("no job")
-                b = self._body()
-                self._json(set_style_choice(Path(job["import"]), str(b.get("name", "")), str(b.get("choice", ""))))
             elif url.path == "/api/open":
                 job = load_job()
                 if job is None:
@@ -475,9 +465,6 @@ def job_command(action: str, note: str) -> int:
             return 1
         print(json.dumps(job, indent=2, ensure_ascii=False))
         print(f"status: {load_status(Path(job['export']))['state']}")
-        if job.get("style_check"):
-            for q in style_questions(Path(job["import"]), [Path(f).stem for f in job["files"]]):
-                print(f"style outlier {q['name']}: choice={q['choice'] or 'pending (the user answers on the panel or in chat)'}")
         return 0
     if job is None:
         print("no panel job to update")

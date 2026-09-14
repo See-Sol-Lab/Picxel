@@ -81,17 +81,9 @@ class EfficiencyTests(unittest.TestCase):
         self.assertIn("prompt=gem.prompt.txt", output.getvalue())
         self.assertIn("save=gem.png", output.getvalue())
 
-    def test_only_keeps_batch_context_and_preserves_other_outputs(self):
+    def test_only_preserves_other_outputs(self):
         for name in ("a", "b"):
             self.asset(name)
-        images = {name: self.root / f"{name}.png" for name in ("a", "b")}
-        px.batch_style(self.root, images)
-        review_path = self.root / "batch.style.json"
-        data = json.loads(review_path.read_text())
-        data.update(profile="Flat fantasy style", references=["a"])
-        for item in data["assets"].values():
-            item.update(match=True, reason="Compatible style", choice=None)
-        review_path.write_text(json.dumps(data), encoding="utf-8")
         out = self.root / "out"
         out.mkdir()
         other = out / "a-32.pxg"
@@ -101,7 +93,6 @@ class EfficiencyTests(unittest.TestCase):
         report = json.loads((out / "batch-report.json").read_text())
         self.assertEqual(report["selected"], ["b"])
         self.assertEqual([j["name"] for j in report["jobs"]], ["b"])
-        self.assertEqual(report["jobs"][0]["style_references"], ["a"])
         self.assertEqual(other.read_text(), "a manually refined result")
 
     def test_unknown_selection_fails_before_processing(self):
@@ -109,6 +100,48 @@ class EfficiencyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "--only"):
             px.batch(self.root, self.root / "out", "none", [32], only=["missing"])
         self.assertFalse((self.root / "out").exists())
+
+    def test_multiple_assets_prepare_directly_and_ignore_old_style_files(self):
+        for name in ("a", "b"):
+            self.asset(name)
+        out = self.root / "out"
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(px.batch(self.root, out, "codex", [64]), 2)
+        legacy = self.root / "batch.style.json"
+        self.assertFalse(legacy.exists())
+        legacy.write_text("old invalid review", encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(px.batch(self.root, out, "codex", [64]), 2)
+        report = json.loads((out / "batch-report.json").read_text())
+        self.assertEqual([j["status"] for j in report["jobs"]], ["needs-concept", "needs-concept"])
+        self.assertEqual([j["concept_file"] for j in report["jobs"]], ["a.png", "b.png"])
+        for job in report["jobs"]:
+            self.assertNotIn("choices", job)
+            self.assertNotIn("style", job)
+        self.assertEqual(legacy.read_text(), "old invalid review")
+
+    def test_ambiguous_reference_names_fail_without_silently_picking_one(self):
+        self.asset("gem")
+        Image.new("RGB", (64, 64), "blue").save(self.root / "gem.jpg")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(px.batch(self.root, self.root / "out", "none", [64]), 1)
+        report = json.loads((self.root / "out/batch-report.json").read_text())
+        self.assertEqual(report["jobs"][0]["status"], "failed")
+        self.assertIn("multiple reference images", report["jobs"][0]["problems"][0])
+
+    def test_palette_is_resolved_relative_to_its_source_not_working_directory(self):
+        import os
+        palette = self.root / "colors.pal"
+        palette.write_text("#ff0000\n")
+        working = self.root / "other"
+        working.mkdir()
+        (working / "colors.pal").write_text("#0000ff\n")
+        previous = Path.cwd()
+        try:
+            os.chdir(working)
+            self.assertEqual(px.palette_colors("colors.pal", self.root), ["#ff0000"])
+        finally:
+            os.chdir(previous)
 
     def test_show_defaults_to_brief_and_full_is_explicit(self):
         sheet = px.Sheet("tile", 128, "tile", "custom", {"A": "#000000"}, ["A"*128]*128)
