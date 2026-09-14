@@ -27,10 +27,10 @@ The assistant makes visual decisions; Python enforces the grid and exports. Requ
 
 `python scripts/picxel.py panel` opens a local page where the human picks the import folder (or a few images), the export folder, single vs batch (at most 20), sizes, and two batch checkboxes: style review and subagent parallel mode. There is no generate button: the page tells the user to talk to you. The page never drives you; it only writes a job file and watches the export folder.
 
-1. `job show` prints the job (import, export, files, sizes, style_check, parallel). Take paths and options from it instead of asking again.
+1. `job show` prints the job (import, export, files, sizes, style_check, parallel) and, with style_check, each outlier's recorded choice. Take paths and options from it instead of asking again. The user may answer the keep/unify question on the page (it writes `choice` into `batch.style.json`) or in chat; either counts, re-run `job show` before assuming it is still pending.
 2. `job start` right before the first batch/refine step; the page shows one spinner with elapsed time.
 3. Work as usual, writing every final `<name>-<size>.png` / `@4x.png` into the export folder (`batch ... -o <export>`; refined sheets rendered there too). Style review only when `style_check` is true (`batch --style-check`). `parallel` true is the user's explicit permission for subagents; otherwise queue.
-4. `job done` at the end, or `job stop --note "why"` when you must stop early (quota, a failed asset you will not retry). Never leave it running: the page then shows cards for what exists and says "interrupted", which is what the user wants to see.
+4. `job done` at the end, or `job stop --note "why"` when you must stop early (quota, a failed asset you will not retry). Never leave it running: the page then shows cards for what exists and says "interrupted", which is what the user wants to see. The page also reads `batch-report.json` in the export folder to explain missing sizes and show check warnings, so keep `batch -o <export>` pointed there.
 
 ## Efficient operations
 

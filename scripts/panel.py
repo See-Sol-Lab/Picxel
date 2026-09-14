@@ -3,7 +3,9 @@ assets go, watch one spinner while the assistant works in chat, then see the res
 
 The panel never drives the assistant. It writes one job file the assistant reads
 (`picxel job show`), and reads back the status file the assistant updates
-(`picxel job start|done|stop`) plus whatever PNGs land in the export folder.
+(`picxel job start|done|stop`), the batch report and whatever PNGs land in the export folder.
+The one thing a human answers on the page -- keep an outlier's own style or unify it -- is
+written into batch.style.json, where `batch --style-check` already expects it.
 Standard library only: http.server for the page, tkinter for the native folder dialogs."""
 from __future__ import annotations
 
@@ -26,20 +28,39 @@ BATCH_LIMIT = 20
 IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp")
 JOB_FILE = Path.home() / ".picxel" / "current-job.json"
 STATUS_NAME = "picxel.status.json"
+REPORT_NAME = "batch-report.json"       # written by `picxel batch` into the export folder
+STYLE_NAME = "batch.style.json"         # written by `picxel batch --style-check` next to the reference images
 IDLE_SECONDS = 240          # no new file in the export folder for this long while "running" -> looks interrupted
 PANEL_HTML = Path(__file__).with_name("panel.html")
+
+# What the page says about a size that has no finished PNG yet, keyed by the batch report status.
+MISSING_REASON = {
+    "needs-style-review": "等 AI 完成画风鉴定",
+    "needs-style-choice": "等你选画风（见上方）",
+    "needs-concept": "等效果图",
+    "check-failed": "底稿没过校验",
+    "failed": "底稿失败",
+    "base-ready": "底稿有了，AI 还没画这个尺寸",
+}
 
 
 def now() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
+def read_json(path: Path, default):
+    if not path.exists():
+        return default
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return default
+
+
 # ---------------------------------------------------------------- job + status files
 
 def load_job() -> dict | None:
-    if not JOB_FILE.exists():
-        return None
-    return json.loads(JOB_FILE.read_text(encoding="utf-8"))
+    return read_json(JOB_FILE, None)
 
 
 def save_job(job: dict) -> dict:
@@ -78,15 +99,17 @@ def save_job(job: dict) -> dict:
     return clean
 
 
+def clear_job() -> None:
+    """Forget the current job so the page starts empty; nothing in the export folder is touched."""
+    JOB_FILE.unlink(missing_ok=True)
+
+
 def status_path(export: Path) -> Path:
     return export / STATUS_NAME
 
 
 def load_status(export: Path) -> dict:
-    p = status_path(export)
-    if not p.exists():
-        return {"state": "waiting", "updated": None, "note": ""}
-    return json.loads(p.read_text(encoding="utf-8"))
+    return read_json(status_path(export), {"state": "waiting", "updated": None, "note": ""})
 
 
 def set_status(export: Path, state: str, note: str = "") -> dict:
@@ -95,47 +118,120 @@ def set_status(export: Path, state: str, note: str = "") -> dict:
     export.mkdir(parents=True, exist_ok=True)
     current = load_status(export)
     status = {"state": state, "updated": now(), "note": note,
-              "started": current.get("started") if state != "running" else now()}
+              "started": now() if state == "running" else current.get("started"),
+              "finished": now() if state in ("done", "interrupted") else None}
     status_path(export).write_text(json.dumps(status, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return status
 
 
+def load_report(export: Path) -> dict:
+    """batch-report.json as {asset name: job entry}; empty when the batch has not run."""
+    report = read_json(export / REPORT_NAME, {})
+    return {j["name"]: j for j in report.get("jobs", []) if isinstance(j, dict) and "name" in j}
+
+
 def scan_results(job: dict) -> dict:
-    """What actually exists in the export folder, grouped by asset name, plus the newest file time."""
+    """What actually exists in the export folder, grouped by asset name, plus the newest file time.
+    A size counts as finished when its @4x preview exists (that is what `render` writes last);
+    the page displays the native PNG so CSS can scale it to any zoom without blur."""
     export = Path(job["export"])
     stems = [Path(f).stem for f in job["files"]]
+    report = load_report(export)
     results, newest = {}, 0.0
     if export.is_dir():
         for p in export.iterdir():
             if p.suffix.lower() == ".png":
                 newest = max(newest, p.stat().st_mtime)
-        for stem in stems:
-            sizes = {}
-            for size in job["sizes"]:
-                preview = export / f"{stem}-{size}@4x.png"
-                if preview.exists():
-                    sizes[str(size)] = f"/file?root=export&path={preview.name}"
-            results[stem] = sizes
+    for stem in stems:
+        sizes = {}
+        for size in job["sizes"]:
+            preview, native = export / f"{stem}-{size}@4x.png", export / f"{stem}-{size}.png"
+            if preview.exists():
+                shown = native if native.exists() else preview
+                sizes[str(size)] = {"png": f"/file?root=export&path={shown.name}",
+                                    "x4": f"/file?root=export&path={preview.name}"}
+        entry = report.get(stem, {})
+        problems = entry.get("problems", [])
+        warnings = [p.replace("(warn) ", "") for p in problems if "(warn)" in p]
+        errors = [p for p in problems if "(warn)" not in p]
+        status = entry.get("status")
+        missing = MISSING_REASON.get(status, "AI 还没画到这张") if len(sizes) < len(job["sizes"]) else ""
+        if status in ("check-failed", "failed") and errors:
+            missing += "：" + errors[0]
+        faces = [f["sheet"] for f in entry.get("face_review", []) if f.get("status") == "needs-face-review"]
+        results[stem] = {"sizes": sizes, "status": status, "missing": missing, "warnings": warnings,
+                         "errors": errors, "faces": faces, "style": entry.get("style")}
     return {"results": results, "newest": newest,
-            "done": sum(1 for s in stems if results.get(s)), "total": len(stems)}
+            "done": sum(1 for s in stems if results[s]["sizes"]), "total": len(stems)}
+
+
+# ---------------------------------------------------------------- style review: the one question a human answers here
+
+def style_questions(import_dir: Path, stems: list[str]) -> list[dict]:
+    """Outliers from batch.style.json that belong to this job, with whatever the user already chose."""
+    review = read_json(import_dir / STYLE_NAME, {})
+    assets = review.get("assets", {}) if isinstance(review, dict) else {}
+    out = []
+    for name in stems:
+        a = assets.get(name)
+        if isinstance(a, dict) and a.get("match") is False:
+            out.append({"name": name, "reason": a.get("reason") or "", "choice": a.get("choice")})
+    return out
+
+
+def set_style_choice(import_dir: Path, name: str, choice: str) -> dict:
+    """Record the human's answer for one outlier. Only `original` / `unify`, only for an asset the
+    assistant marked as an outlier -- the same rules `batch` enforces when it reads the file."""
+    if choice not in ("original", "unify"):
+        raise ValueError("choice must be original or unify")
+    path = import_dir / STYLE_NAME
+    review = read_json(path, None)
+    if not isinstance(review, dict) or not isinstance(review.get("assets"), dict):
+        raise ValueError("no style review yet -- ask the AI to run the style check first")
+    asset = review["assets"].get(name)
+    if not isinstance(asset, dict):
+        raise ValueError(f"{name} is not in the style review")
+    if asset.get("match") is not False:
+        raise ValueError(f"{name} matches the batch style; nothing to choose")
+    asset["choice"] = choice
+    path.write_text(json.dumps(review, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return {"name": name, "choice": choice}
+
+
+# ---------------------------------------------------------------- what the page polls
+
+def _seconds_since(iso: str | None) -> float | None:
+    if not iso:
+        return None
+    return max(0.0, datetime.now(timezone.utc).timestamp() - datetime.fromisoformat(iso).timestamp())
 
 
 def state_payload() -> dict:
     job = load_job()
     if job is None:
         return {"job": None, "status": {"state": "waiting"}, "results": {}, "done": 0, "total": 0}
-    status = load_status(Path(job["export"]))
+    export = Path(job["export"])
+    if not export.is_dir():
+        return {"job": job, "status": {"state": "waiting"}, "results": {}, "done": 0, "total": len(job["files"]),
+                "export_missing": True, "import_missing": not Path(job["import"]).is_dir()}
+    status = load_status(export)
     scan = scan_results(job)
     idle = None
+    elapsed = None
     if status.get("state") == "running":
-        last = scan["newest"]
-        if not last and status.get("started"):
-            last = datetime.fromisoformat(status["started"]).timestamp()
+        last = scan["newest"] or (datetime.fromisoformat(status["started"]).timestamp() if status.get("started") else 0)
         idle = max(0, datetime.now().timestamp() - last) if last else 0
         if idle > IDLE_SECONDS:
             status = dict(status, looks_stalled=True)
+        elapsed = _seconds_since(status.get("started"))
+    elif status.get("started") and status.get("finished"):
+        elapsed = max(0.0, datetime.fromisoformat(status["finished"]).timestamp()
+                      - datetime.fromisoformat(status["started"]).timestamp())
+    stems = [Path(f).stem for f in job["files"]]
     originals = {Path(f).stem: f"/file?root=import&path={f}" for f in job["files"]}
-    return {"job": job, "status": status, "originals": originals, "idle": idle, **scan}
+    style = style_questions(Path(job["import"]), stems) if job.get("style_check") else []
+    return {"job": job, "status": status, "originals": originals, "idle": idle, "elapsed": elapsed,
+            "style": style, "import_missing": not Path(job["import"]).is_dir(), **scan}
 
 
 # ---------------------------------------------------------------- native dialogs / opening folders
@@ -228,16 +324,26 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"paths": pick(self._body().get("kind", "dir"))})
             elif url.path == "/api/job":
                 self._json({"job": save_job(self._body())})
+            elif url.path == "/api/clear":
+                clear_job()
+                self._json({"ok": True})
             elif url.path == "/api/stop":
                 job = load_job()
                 if job is None:
                     raise ValueError("no job")
                 self._json({"status": set_status(Path(job["export"]), "interrupted", "面板上手动结束等待")})
+            elif url.path == "/api/style":
+                job = load_job()
+                if job is None:
+                    raise ValueError("no job")
+                b = self._body()
+                self._json(set_style_choice(Path(job["import"]), str(b.get("name", "")), str(b.get("choice", ""))))
             elif url.path == "/api/open":
                 job = load_job()
                 if job is None:
                     raise ValueError("no job")
-                open_folder(Path(job["export"]))
+                which = self._body().get("which", "export")
+                open_folder(Path(job["import" if which == "import" else "export"]))
                 self._json({"ok": True})
             else:
                 self.send_error(404)
@@ -270,6 +376,9 @@ def job_command(action: str, note: str) -> int:
             return 1
         print(json.dumps(job, indent=2, ensure_ascii=False))
         print(f"status: {load_status(Path(job['export']))['state']}")
+        if job.get("style_check"):
+            for q in style_questions(Path(job["import"]), [Path(f).stem for f in job["files"]]):
+                print(f"style outlier {q['name']}: choice={q['choice'] or 'pending (the user answers on the panel or in chat)'}")
         return 0
     if job is None:
         print("no panel job to update")

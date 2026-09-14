@@ -4,44 +4,95 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Picxel</title>
 <style>
-:root{--bg:#161a22;--panel:#1c212b;--card:#232936;--fg:#e6e8ee;--dim:#8d94a5;--line:#2e3442;--accent:#6c5ce7;--ok:#3fb950;--warn:#e3b341;--bad:#f85149}
+:root{--bg:#161a22;--panel:#1c212b;--card:#232936;--fg:#e6e8ee;--dim:#8d94a5;--line:#2e3442;--btn:#2b3140;--btn2:#343b4c;
+  --accent:#6c5ce7;--ok:#3fb950;--warn:#e3b341;--bad:#f85149;--okbg:#1f3a2a;--warnbg:#3a3220;--badbg:#3a2323;
+  --check1:#2a3040;--check2:#20262f;--overlay:rgba(8,10,14,.86)}
+@media (prefers-color-scheme:light){:root{--bg:#f3f4f7;--panel:#ffffff;--card:#ffffff;--fg:#1c2130;--dim:#6b7280;--line:#dfe2ea;--btn:#eef0f5;--btn2:#e2e5ee;
+  --okbg:#e3f5e8;--warnbg:#fbf3d9;--badbg:#fde4e4;--ok:#1f8a3b;--warn:#9a6d00;--bad:#c0262d;--check1:#d9dce4;--check2:#eceef3;--overlay:rgba(20,22,30,.82)}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;display:flex;min-height:100vh}
 aside{width:340px;flex:none;background:var(--panel);border-right:1px solid var(--line);padding:24px 22px;display:flex;flex-direction:column;gap:18px}
-main{flex:1;padding:28px 32px;overflow:auto}
+main{flex:1;padding:28px 32px;overflow:auto;min-width:0}
 h1{font-size:22px;margin:0}
 h1 small{font-size:12px;color:var(--dim);margin-left:8px;font-weight:normal}
 .sub{color:var(--dim);font-size:12px;margin-top:-12px}
 .step{font-size:12px;color:var(--dim);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px}
-button{background:#2b3140;color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:9px 14px;font:inherit;cursor:pointer}
-button:hover{background:#343b4c}
+button{background:var(--btn);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:9px 14px;font:inherit;cursor:pointer}
+button:hover{background:var(--btn2)}
 button:disabled{opacity:.45;cursor:default}
-.path{font-size:12px;color:var(--dim);word-break:break-all;margin-top:6px;min-height:18px}
+button.mini{padding:2px 8px;font-size:11px;border-radius:7px;color:var(--dim)}
+button.primary{background:var(--accent);border-color:transparent;color:#fff}
+button.primary:hover{filter:brightness(1.1)}
+.path{font-size:12px;color:var(--dim);margin-top:6px;min-height:18px;display:flex;gap:6px;align-items:flex-start}
+.path span{word-break:break-all;flex:1}
+.path .folder{color:var(--fg)}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.seg{display:inline-flex;background:#2b3140;border-radius:10px;padding:3px}
+.seg{display:inline-flex;background:var(--btn);border-radius:10px;padding:3px}
 .seg button{border:0;background:transparent;padding:6px 12px;border-radius:8px}
 .seg button.on{background:var(--accent);color:#fff}
 label.chk{display:flex;gap:8px;align-items:flex-start;color:var(--fg);cursor:pointer}
 label.chk input{margin-top:3px}
 label.chk small{display:block;color:var(--dim)}
-.hint{margin-top:auto;background:#12151c;border:1px dashed var(--line);border-radius:12px;padding:16px;text-align:center;color:var(--dim);line-height:1.7}
+.hint{margin-top:auto;background:var(--bg);border:1px dashed var(--line);border-radius:12px;padding:16px;text-align:center;color:var(--dim);line-height:1.7}
 .hint b{color:var(--fg);display:block;font-size:15px;margin-bottom:4px}
+.hint.live{border-color:var(--accent)}
 .err{color:var(--bad);font-size:12px;min-height:18px}
 .center{height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;color:var(--dim);text-align:center}
 .spin{width:54px;height:54px;border:5px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:r 1s linear infinite}
 @keyframes r{to{transform:rotate(360deg)}}
-.banner{display:flex;gap:14px;align-items:center;margin-bottom:22px;flex-wrap:wrap}
-.pill{padding:4px 10px;border-radius:999px;font-size:12px;background:#2b3140}
-.pill.ok{background:#1f3a2a;color:var(--ok)}.pill.warn{background:#3a3220;color:var(--warn)}.pill.bad{background:#3a2323;color:var(--bad)}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:26px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
-.card .t{font-size:13px;color:var(--dim);margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.card .img{aspect-ratio:1;display:flex;align-items:center;justify-content:center;background:
-  linear-gradient(45deg,#2a3040 25%,transparent 25%,transparent 75%,#2a3040 75%),linear-gradient(45deg,#2a3040 25%,transparent 25%,transparent 75%,#2a3040 75%);
-  background-size:16px 16px;background-position:0 0,8px 8px;background-color:#20262f;border-radius:8px;overflow:hidden}
-.card img{max-width:100%;max-height:100%;image-rendering:pixelated}
-.card .miss{color:var(--dim);font-size:12px}
-.name{font-weight:600;margin:6px 0 8px}
+.banner{display:flex;gap:10px;align-items:center;margin-bottom:22px;flex-wrap:wrap}
+.pill{padding:4px 10px;border-radius:999px;font-size:12px;background:var(--btn)}
+.pill.ok{background:var(--okbg);color:var(--ok)}.pill.warn{background:var(--warnbg);color:var(--warn)}.pill.bad{background:var(--badbg);color:var(--bad)}
+.notice{background:var(--warnbg);color:var(--warn);border-radius:12px;padding:14px 16px;margin-bottom:22px;line-height:1.7}
+.notice.bad{background:var(--badbg);color:var(--bad)}
+.asset{margin-bottom:28px}
+.asset .head{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+.asset .name{font-weight:600;font-size:15px}
+.tag{font-size:11px;color:var(--dim);background:var(--btn);border-radius:6px;padding:2px 7px}
+.tag.warn{color:var(--warn);background:var(--warnbg)}.tag.bad{color:var(--bad);background:var(--badbg)}.tag.ok{color:var(--ok);background:var(--okbg)}
+.strip{display:flex;gap:12px;flex-wrap:wrap;align-items:stretch}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px;cursor:pointer;display:flex;flex-direction:column;min-width:120px}
+.card:hover{border-color:var(--accent)}
+.card .t{font-size:12px;color:var(--dim);margin-bottom:8px;white-space:nowrap}
+.card .img{flex:1;display:flex;align-items:center;justify-content:center;border-radius:8px;overflow:hidden;min-height:140px;padding:6px;
+  background:linear-gradient(45deg,var(--check1) 25%,transparent 25%,transparent 75%,var(--check1) 75%),linear-gradient(45deg,var(--check1) 25%,transparent 25%,transparent 75%,var(--check1) 75%);
+  background-size:16px 16px;background-position:0 0,8px 8px;background-color:var(--check2)}
+.card img{image-rendering:pixelated;display:block}
+.card.orig .img{width:160px;height:160px;min-height:0}
+.card.orig img{max-width:100%;max-height:100%;image-rendering:auto}
+.card .miss{color:var(--dim);font-size:12px;text-align:center;line-height:1.5;padding:8px;max-width:160px}
+.card.empty{cursor:default}.card.empty:hover{border-color:var(--line)}
+details.warn{margin-top:8px;font-size:12px;color:var(--dim)}
+details.warn summary{cursor:pointer;color:var(--warn)}
+details.warn li{margin:2px 0}
+/* style review questions */
+.ask{background:var(--card);border:1px solid var(--warn);border-radius:12px;padding:14px 16px;margin-bottom:22px}
+.ask h3{margin:0 0 6px;font-size:14px;color:var(--warn)}
+.ask .q{display:flex;gap:14px;align-items:center;padding:10px 0;border-top:1px solid var(--line);flex-wrap:wrap}
+.ask .q:first-of-type{border-top:0}
+.ask .q img{width:64px;height:64px;object-fit:contain;border-radius:8px;background:var(--check2)}
+.ask .q .why{flex:1;min-width:200px;color:var(--dim);font-size:13px}
+.ask .q .why b{color:var(--fg)}
+/* compare overlay */
+.overlay{position:fixed;inset:0;background:var(--overlay);display:flex;flex-direction:column;z-index:9}
+.overlay .bar{display:flex;gap:12px;align-items:center;padding:14px 20px;flex-wrap:wrap}
+.overlay .bar .name{font-weight:600;font-size:16px;flex:1}
+.overlay .stage{flex:1;overflow:auto;display:flex;gap:28px;align-items:center;justify-content:safe center;padding:10px 30px 30px}
+.overlay .item{text-align:center;flex:none}
+.overlay .item .box{display:inline-block;border-radius:8px;padding:8px;
+  background:linear-gradient(45deg,var(--check1) 25%,transparent 25%,transparent 75%,var(--check1) 75%),linear-gradient(45deg,var(--check1) 25%,transparent 25%,transparent 75%,var(--check1) 75%);
+  background-size:16px 16px;background-position:0 0,8px 8px;background-color:var(--check2)}
+.overlay .item img{display:block;image-rendering:pixelated}
+.overlay .item.orig img{image-rendering:auto;max-height:60vh;max-width:40vw}
+.overlay .item .cap{margin-top:8px;color:var(--dim);font-size:12px}
+.overlay .nav{background:var(--btn);border-radius:50%;width:38px;height:38px;padding:0;font-size:18px}
+kbd{font:11px/1 ui-monospace,monospace;color:var(--dim);border:1px solid var(--line);border-radius:4px;padding:2px 5px}
+@media (max-width:760px){
+  body{flex-direction:column}
+  aside{width:auto;border-right:0;border-bottom:1px solid var(--line)}
+  main{padding:20px 16px}
+  .hint{margin-top:4px}
+}
 </style>
 <body>
 <aside>
@@ -54,13 +105,13 @@ label.chk small{display:block;color:var(--dim)}
       <button id="pickImport">选择图片文件夹</button>
       <button id="pickFiles">选几张图</button>
     </div>
-    <div class="path" id="importPath">未选择</div>
+    <div class="path" id="importPath"><span>未选择</span></div>
   </div>
 
   <div>
     <div class="step">第二步 · 导出位置</div>
     <button id="pickExport">选择输出文件夹</button>
-    <div class="path" id="exportPath">默认为导入位置下的 picxel-out</div>
+    <div class="path" id="exportPath"><span>默认为导入位置下的 picxel-out</span></div>
   </div>
 
   <div>
@@ -76,23 +127,41 @@ label.chk small{display:block;color:var(--dim)}
 
   <div class="err" id="err"></div>
   <div class="hint" id="hint"><b>选择好导入位置和导出位置后</b>请与 AI 对话开始生图</div>
+  <button id="newJob" hidden>新任务（清空当前设置）</button>
 </aside>
 
 <main id="main"><div class="center">面板会在这里显示结果。</div></main>
 
 <script>
 const $=s=>document.querySelector(s);
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 let ui={import:"",export:"",files:[],mode:"single",sizes:[64],saved:null};
+let last=null;                                  // latest /api/state payload
+let view={asset:null,zoom:4};                   // compare overlay
 const api=(p,b)=>fetch(p,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b||{})}).then(r=>r.json());
 function err(m){$("#err").textContent=m||""}
+
+// ---------- sidebar
+function pathLine(el,full,fallback,extra){
+  if(!full){el.innerHTML=`<span>${esc(fallback)}</span>`;return}
+  const norm=full.replace(/\//g,"\\"), i=norm.lastIndexOf("\\");
+  const head=i>=0?norm.slice(0,i+1):"", tail=i>=0?norm.slice(i+1):norm;
+  el.innerHTML=`<span title="${esc(norm)}">${esc(head)}<b class="folder">${esc(tail)}</b>${extra?" "+esc(extra):""}</span><button class="mini copy" title="复制路径">复制</button>`;
+  el.querySelector(".copy").onclick=async e=>{try{await navigator.clipboard.writeText(norm);e.target.textContent="已复制";setTimeout(()=>e.target.textContent="复制",1200)}catch{err("复制失败，请手动选中路径")}};
+}
 function refreshSide(){
-  $("#importPath").textContent=ui.import?(ui.files.length?`${ui.import}（${ui.files.length} 张）`:ui.import):"未选择";
-  $("#exportPath").textContent=ui.export||"默认为导入位置下的 picxel-out";
+  pathLine($("#importPath"),ui.import,"未选择",ui.files.length>1?`（${ui.files.length} 张）`:ui.files.length===1?`（${ui.files[0]}）`:"");
+  pathLine($("#exportPath"),ui.export,"默认为导入位置下的 picxel-out","");
   $("#modeSingle").classList.toggle("on",ui.mode==="single");$("#modeBatch").classList.toggle("on",ui.mode==="batch");
   document.querySelectorAll("#sizes button").forEach(b=>b.classList.toggle("on",ui.sizes.includes(+b.dataset.s)));
   $("#styleCheck").disabled=$("#parallel").disabled=ui.mode!=="batch";
-  const ready=!!ui.import;
-  $("#hint").innerHTML=ready?"<b>位置已就绪</b>请与 AI 对话开始生图<br><span style='font-size:12px'>例如：“按面板的设置开始画”</span>":"<b>选择好导入位置和导出位置后</b>请与 AI 对话开始生图";
+  $("#newJob").hidden=!ui.saved;
+  const st=last&&last.job?last.status.state:null, h=$("#hint");
+  h.classList.toggle("live",st==="running");
+  if(!ui.import)h.innerHTML="<b>选择好导入位置和导出位置后</b>请与 AI 对话开始生图";
+  else if(st==="running")h.innerHTML="<b>AI 正在画</b>改动这里的设置不会影响正在进行的这批";
+  else if(st==="done"||st==="interrupted")h.innerHTML="<b>这批已结束</b>想再画：点下面「新任务」，或直接换导入位置";
+  else h.innerHTML="<b>位置已就绪</b>请与 AI 对话开始生图<br><span style='font-size:12px'>例如：“按面板的设置开始画”</span>";
 }
 async function save(){
   if(!ui.import)return;
@@ -110,39 +179,117 @@ $("#modeSingle").onclick=()=>{ui.mode="single";save();refreshSide()};
 $("#modeBatch").onclick=()=>{ui.mode="batch";save();refreshSide()};
 document.querySelectorAll("#sizes button").forEach(b=>b.onclick=()=>{const s=+b.dataset.s;ui.sizes=ui.sizes.includes(s)?ui.sizes.filter(x=>x!==s):[...ui.sizes,s].sort((a,b)=>a-b);if(!ui.sizes.length)ui.sizes=[64];save();refreshSide()});
 $("#styleCheck").onchange=$("#parallel").onchange=save;
+$("#newJob").onclick=async()=>{
+  if(last&&last.status.state==="running"&&!confirm("AI 还在画这批。清空设置不会停止它，只是面板不再显示这批。继续？"))return;
+  await api("/api/clear");ui={import:"",export:"",files:[],mode:"single",sizes:[64],saved:null};
+  $("#styleCheck").checked=$("#parallel").checked=false;last=null;refreshSide();render({job:null});
+};
 
-function fmt(sec){sec=Math.floor(sec);return sec<60?`${sec} 秒`:`${Math.floor(sec/60)} 分 ${sec%60} 秒`}
-function render(st){
-  const m=$("#main");
-  if(!st.job){m.innerHTML='<div class="center">面板会在这里显示结果。</div>';return}
-  const s=st.status.state, started=st.status.started?new Date(st.status.started):null;
-  if(s==="waiting"){m.innerHTML=`<div class="center"><div>已记录 ${st.total} 张图 · 尺寸 ${st.job.sizes.join(" / ")}</div><div>等 AI 开始。</div></div>`;return}
-  if(s==="running"){
-    const el=started?fmt((Date.now()-started)/1000):"";
-    const stall=st.status.looks_stalled?`<div style="color:var(--warn)">${fmt(st.idle)} 没有新文件了——AI 可能停了（用量、网络或别的）。可以继续等，或者<button id="stopBtn" style="margin-left:6px">结束等待，看已完成的</button></div>`:"";
-    m.innerHTML=`<div class="center"><div class="spin"></div><div>AI 正在画 · 已用 ${el}</div><div>${st.done} / ${st.total} 张已有结果</div>${stall}</div>`;
-    const b=$("#stopBtn");if(b)b.onclick=()=>api("/api/stop").then(poll);
-    return}
-  // done / interrupted: cards for what exists, honest line for what doesn't
-  const ok=s==="done", pill=ok?`<span class="pill ok">生成成功 ${st.done} / ${st.total}</span>`:`<span class="pill warn">生成中断 · 完成 ${st.done} / ${st.total}</span>`;
-  const note=st.status.note?`<span class="pill">${st.status.note}</span>`:"";
-  let html=`<div class="banner">${pill}${note}<button id="openBtn">打开导出位置查看</button></div>`;
-  for(const [name,sizes] of Object.entries(st.results)){
-    html+=`<div class="name">${name}</div><div class="grid">`;
-    html+=`<div class="card"><div class="t">原图</div><div class="img"><img src="${st.originals[name]}"></div></div>`;
-    for(const sz of st.job.sizes){
-      html+=sizes[sz]?`<div class="card"><div class="t">${sz} × ${sz}</div><div class="img"><img src="${sizes[sz]}&t=${Date.now()}"></div></div>`
-                     :`<div class="card"><div class="t">${sz} × ${sz}</div><div class="img"><span class="miss">未生成</span></div></div>`;
-    }
-    html+=`</div>`;
+// ---------- main
+function fmt(sec){sec=Math.floor(sec||0);return sec<60?`${sec} 秒`:sec<3600?`${Math.floor(sec/60)} 分 ${sec%60} 秒`:`${Math.floor(sec/3600)} 时 ${Math.floor(sec%3600/60)} 分`}
+function clock(iso){if(!iso)return"";const d=new Date(iso);return d.toLocaleTimeString("zh-CN",{hour:"2-digit",minute:"2-digit"})}
+const STYLE_LABEL={original:"保留原图风格",unify:"统一画风"};
+
+function styleBlock(st){
+  if(!st.style||!st.style.length)return"";
+  let h=`<div class="ask"><h3>画风鉴定 · ${st.style.filter(q=>!q.choice).length?"有几张需要你决定":"已决定"}</h3>`;
+  for(const q of st.style){
+    const pick=q.choice?`<span class="tag ok">已选：${STYLE_LABEL[q.choice]}</span> <button class="mini" data-style="${esc(q.name)}" data-choice="">改</button>`
+      :`<button class="primary" data-style="${esc(q.name)}" data-choice="original">保留原图风格</button><button data-style="${esc(q.name)}" data-choice="unify">统一画风</button>`;
+    h+=`<div class="q"><img src="${st.originals[q.name]||""}"><div class="why"><b>${esc(q.name)}</b> 与这批的画风差别较大<br>${esc(q.reason)}</div><div class="row">${pick}</div></div>`;
   }
-  m.innerHTML=html;$("#openBtn").onclick=()=>api("/api/open");
+  return h+`</div>`;
 }
+function bindStyle(){
+  document.querySelectorAll("[data-style]").forEach(b=>b.onclick=async()=>{
+    const name=b.dataset.style, choice=b.dataset.choice;
+    if(!choice){const q=last.style.find(x=>x.name===name);if(q)q.choice=null;render(last);return}   // "改": show the two buttons again
+    const r=await api("/api/style",{name,choice});if(r.error)return err(r.error);poll();
+  });
+}
+function assetBlock(st,name,r){
+  const tags=[];
+  if(r.style&&r.style.mode==="unify")tags.push(`<span class="tag">统一画风</span>`);
+  if(r.style&&r.style.mode==="original"&&st.style&&st.style.some(q=>q.name===name))tags.push(`<span class="tag">保留原图风格</span>`);
+  if(r.faces&&r.faces.length)tags.push(`<span class="tag warn">面部待修 · ${r.faces.length}</span>`);
+  if(r.errors&&r.errors.length)tags.push(`<span class="tag bad">底稿失败</span>`);
+  let h=`<div class="asset"><div class="head"><span class="name">${esc(name)}</span>${tags.join("")}</div><div class="strip">`;
+  h+=`<div class="card orig" data-open="${esc(name)}"><div class="t">原图</div><div class="img"><img src="${st.originals[name]}"></div></div>`;
+  for(const sz of st.job.sizes){
+    const got=r.sizes[sz];
+    h+=got?`<div class="card" data-open="${esc(name)}"><div class="t">${sz} × ${sz} <span style="opacity:.6">· 2 倍</span></div><div class="img"><img src="${got.png}&t=${st.status.updated||""}" width="${sz*2}" height="${sz*2}"></div></div>`
+          :`<div class="card empty"><div class="t">${sz} × ${sz}</div><div class="img"><span class="miss">未生成${r.missing?"<br>"+esc(r.missing):""}</span></div></div>`;
+  }
+  h+=`</div>`;
+  if(r.warnings&&r.warnings.length)h+=`<details class="warn"><summary>${r.warnings.length} 条校验提示</summary><ul>${r.warnings.map(w=>`<li>${esc(w)}</li>`).join("")}</ul></details>`;
+  return h+`</div>`;
+}
+function render(st){
+  last=st;
+  const m=$("#main");
+  if(!st.job){m.innerHTML='<div class="center">面板会在这里显示结果。</div>';refreshSide();return}
+  if(st.export_missing){
+    m.innerHTML=`<div class="notice bad">导出文件夹不在了：<b>${esc(st.job.export)}</b><br>可能被删了或换了盘。重新选一个导出位置，或者点「新任务」。</div>`;refreshSide();return}
+  const s=st.status.state;
+  let html=st.import_missing?`<div class="notice">导入文件夹不在了：${esc(st.job.import)}。成品还能看，原图显示不出来。</div>`:"";
+  if(s==="waiting"){
+    html+=`<div class="banner"><span class="pill">已记录 ${st.total} 张 · ${st.job.mode==="single"?"单张":"批量"} · ${st.job.sizes.join(" / ")}</span><span class="pill">等 AI 开始</span></div>`;
+    html+=styleBlock(st);
+    html+=`<div class="strip">`+Object.keys(st.results).map(n=>`<div class="card orig empty"><div class="t">${esc(n)}</div><div class="img"><img src="${st.originals[n]}"></div></div>`).join("")+`</div>`;
+    m.innerHTML=html;bindStyle();refreshSide();return}
+  if(s==="running"){
+    const stall=st.status.looks_stalled?`<div style="color:var(--warn)">${fmt(st.idle)} 没有新文件了——AI 可能停了（用量、网络或别的）。可以继续等，或者<button id="stopBtn" style="margin-left:6px">结束等待，看已完成的</button></div>`:"";
+    m.innerHTML=html+`<div class="center"><div class="spin"></div><div>AI 正在画 · 已用 ${fmt(st.elapsed)}</div><div>${st.done} / ${st.total} 张已有结果</div>${stall}</div>`;
+    const b=$("#stopBtn");if(b)b.onclick=()=>api("/api/stop").then(poll);
+    refreshSide();return}
+  // done / interrupted: cards for what exists, honest line for what doesn't
+  const ok=s==="done";
+  html+=`<div class="banner">${ok?`<span class="pill ok">生成成功 ${st.done} / ${st.total}</span>`:`<span class="pill warn">生成中断 · 完成 ${st.done} / ${st.total}</span>`}`;
+  if(st.status.note)html+=`<span class="pill">${esc(st.status.note)}</span>`;
+  if(st.elapsed!=null)html+=`<span class="pill">用时 ${fmt(st.elapsed)}${st.status.finished?" · "+clock(st.status.finished)+" 结束":""}</span>`;
+  html+=`<button id="openBtn">打开导出位置</button></div>`;
+  html+=styleBlock(st);
+  for(const [name,r] of Object.entries(st.results))html+=assetBlock(st,name,r);
+  m.innerHTML=html;$("#openBtn").onclick=()=>api("/api/open",{which:"export"});bindStyle();
+  document.querySelectorAll("[data-open]").forEach(c=>c.onclick=()=>openCompare(c.dataset.open));
+  refreshSide();
+}
+
+// ---------- compare overlay
+function openCompare(name){view.asset=name;drawCompare()}
+function closeCompare(){view.asset=null;const o=$(".overlay");if(o)o.remove()}
+function drawCompare(){
+  const st=last;if(!st||!view.asset||!st.results[view.asset]){closeCompare();return}
+  const names=Object.keys(st.results), i=names.indexOf(view.asset), r=st.results[view.asset];
+  let o=$(".overlay");if(!o){o=document.createElement("div");o.className="overlay";document.body.appendChild(o);o.onclick=e=>{if(e.target===o)closeCompare()}}
+  let items=`<div class="item orig"><div class="box"><img src="${st.originals[view.asset]}"></div><div class="cap">原图</div></div>`;
+  for(const sz of st.job.sizes){
+    const got=r.sizes[sz];
+    items+=got?`<div class="item"><div class="box"><img src="${got.png}" width="${sz*view.zoom}" height="${sz*view.zoom}"></div><div class="cap">${sz} × ${sz} · ${view.zoom} 倍</div></div>`
+              :`<div class="item"><div class="box" style="width:${Math.max(120,sz*view.zoom)}px;height:${Math.max(120,sz*view.zoom)}px;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:12px">未生成</div><div class="cap">${sz} × ${sz}</div></div>`;
+  }
+  o.innerHTML=`<div class="bar"><button class="nav" id="prev" ${i<=0?"disabled":""}>‹</button><span class="name">${esc(view.asset)} <span style="color:var(--dim);font-weight:normal;font-size:12px">${i+1} / ${names.length}</span></span>
+    <span class="seg" id="zoom">${[1,2,4,8].map(z=>`<button data-z="${z}" class="${z===view.zoom?"on":""}">${z}×</button>`).join("")}</span>
+    <button class="nav" id="next" ${i>=names.length-1?"disabled":""}>›</button><button id="close">关闭 <kbd>Esc</kbd></button></div><div class="stage">${items}</div>`;
+  $("#close").onclick=closeCompare;
+  $("#prev").onclick=()=>{view.asset=names[i-1];drawCompare()};$("#next").onclick=()=>{view.asset=names[i+1];drawCompare()};
+  o.querySelectorAll("#zoom button").forEach(b=>b.onclick=()=>{view.zoom=+b.dataset.z;drawCompare()});
+}
+document.addEventListener("keydown",e=>{
+  if(!view.asset)return;
+  if(e.key==="Escape")closeCompare();
+  else if(e.key==="ArrowLeft"){const b=$("#prev");if(b&&!b.disabled)b.click()}
+  else if(e.key==="ArrowRight"){const b=$("#next");if(b&&!b.disabled)b.click()}
+});
+
+// ---------- poll
+let lastKey="";
 async function poll(){
   try{const st=await (await fetch("/api/state")).json();
+    const key=JSON.stringify(st);if(key===lastKey)return;lastKey=key;      // redraw only when something changed
     if(st.job&&!ui.saved){ui={import:st.job.import,export:st.job.export,files:st.job.files,mode:st.job.mode,sizes:st.job.sizes,saved:st.job};
-      $("#styleCheck").checked=st.job.style_check;$("#parallel").checked=st.job.parallel;refreshSide()}
-    render(st)}catch(e){}
+      $("#styleCheck").checked=st.job.style_check;$("#parallel").checked=st.job.parallel}
+    if(view.asset){last=st;drawCompare();refreshSide()}else render(st)}catch(e){}
 }
 refreshSide();poll();setInterval(poll,2000);
 </script>
