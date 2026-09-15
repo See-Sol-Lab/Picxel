@@ -1,11 +1,21 @@
 ---
 name: picxel
-description: Create and refine pixel-art game assets in Claude Code or Codex: references or descriptions to palette-indexed 32/64/128 PNGs, editable grids and spritesheets, using current-session drawing or image tools without requiring an API key.
+description: Install, set up, create or refine pixel-art game assets with Picxel. Use for Picxel requests and reference-image-to-game-sprite tasks. Automatically prepare and show the local panel before drawing; use current-session image tools plus local palette, transparency and pixel-grid algorithms. Documentation or code review alone does not open the panel.
 ---
 
 # Picxel
 
 The assistant makes visual decisions; Python enforces the grid and exports. Requires Python 3.10+ and Pillow. Run from this directory or use absolute script paths.
+
+## First action: prepare and show the panel
+
+For installation/setup and every asset-creation or refinement task, open the panel proactively. A separate request to open it is not needed. Resolve the skill root from this file, not the user's working directory.
+
+1. Use an available Python 3.10+ runtime (prefer the host's supplied runtime when present). Run `python <skill-root>/scripts/start_panel.py --no-open` in a local shell. It reuses a healthy panel from this installation, or starts one hidden; missing Pillow is installed into the skill's `.venv`. The JSON result contains `url`, `python`, `pid`, and `reused`. Use that returned Python for later Picxel commands. If another application owns the port or setup fails, report the actual error; do not start duplicate servers or invent a successful launch.
+2. Show `url` with the host's browser-opening tool when available (in Codex desktop, `open_in_codex` with a browser target). Otherwise run `start_panel.py` without `--no-open` to open the system browser. Merely returning a link is insufficient when an opening tool is available. Verify the ready page or health response. This starts the panel, not image generation.
+3. Read `job show`. If the user supplied images/settings in chat, save those through `panel.save_job` and use them; otherwise let them select in the panel. Preserve active tasks and existing outputs. Setup-only requests finish with the panel ready; draw only when the user has requested generation and the inputs are ready.
+
+Installed skill metadata allows implicit invocation for matching tasks; explicit `$picxel` invocation also works. Installing files alone does not execute an idle assistant. Follow the host's normal permissions, and do not install global hooks or change its configuration.
 
 ## Contract
 
@@ -22,7 +32,7 @@ The assistant makes visual decisions; Python enforces the grid and exports. Requ
 5. **Eyes/mouth only when needed.** For complex faces, follow the face prompt and [faces.md](references/faces.md). Inspect the high-resolution original gaze before a local patch. Preserve eyebrows, nose, hair and eye contours; gaze outranks contrast. Clear faces stay unchanged. Do not smooth/outline after eye repair.
 6. **Deliver immediately after acceptance.** For a panel job, `job done` exports the image-only deliverables; give a concise result. Create an atlas/HTML with `sheet work -o work/dist` only when requested. Do not rerun batch, build duplicate packaging, or write a lengthy review log just to finish. Read the full JSON report only when the console summary lacks a needed detail.
 
-## The panel (when the user mentions it)
+## Panel task lifecycle
 
 `python scripts/picxel.py panel` opens a local page where the human picks the import folder (or a few images), the export folder, single vs batch (at most 20), sizes, with no optional checkboxes. Assets are generated sequentially. There is no generate button: the page tells the user to talk to you. The page never drives you; it only writes a job file and watches the export folder.
 

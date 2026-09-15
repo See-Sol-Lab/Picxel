@@ -1,0 +1,6 @@
+interface:
+  display_name: "Picxel"
+  short_description: "Redraw references as pixel-art game assets"
+  default_prompt: "Use $picxel to turn my reference images into pixel-art game assets."
+policy:
+  allow_implicit_invocation: true

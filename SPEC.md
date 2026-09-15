@@ -47,6 +47,10 @@ Python 不调用对话工具，也不启动 Codex / Claude 子进程。
 
 ## 人类面板
 
+素材任务与初始化首先由助手执行 `scripts/start_panel.py`：复用本安装已就绪的面板，或选择可用 Python 并启动隐藏服务。缺少 Pillow 时安装到项目 `.venv`；正常启动不重装依赖。脚本用 `/api/health` 核对服务身份与就绪状态，返回 URL 和后续处理使用的 Python 路径。Codex 有浏览器打开工具时由助手展示该 URL；否则脚本打开系统浏览器。启动面板不等于开始生成。
+
+安装后的 `agents/openai.yaml` 允许匹配素材请求时隐式调用；仓库 `AGENTS.md` 将本项目的素材任务引导到 `SKILL.md`。实际执行仍需初始化或素材请求触发，不安装全局 hook，不让空闲会话自行运行。手动前台运行入口 `python scripts/picxel.py panel` 继续用于调试。
+
 `panel` 使用标准库 HTTP 服务与系统文件对话框。用户选择图片、输出位置、单张或批量（最多 20 张）及尺寸，逐张生成，没有附加勾选项。批量选图可以分次追加并去重，同批素材来自同一目录。提示框与「新任务」紧接尺寸选择。
 
 界面中英双语：文案表在 `panel.html` 内，语言存 `localStorage`，默认按 `navigator.language`；每个 POST 带 `lang`，服务端只翻译人会看到的几句（任务未结束的拒绝、手动结束的备注、文件对话框标题），`missing_code` / `missing_detail` 由页面翻译，`missing` 保留中文给 `job show` 与测试。任务写入 `~/.picxel/current-job.json`；`job show / start / ask / done / stop --note` 管理状态。`asking` 用于等待用户在对话中澄清，恢复时保留起始时刻。新任务的无产物等待时间不早于本次开始时刻，不沿用旧 PNG 的时间。批量生成时转圈；单张显示原图、效果图与已有像素成品，提供约 5 秒的色块显现演示，可跳过和重播，不代表模型内部落笔顺序，不影响生成与导出。

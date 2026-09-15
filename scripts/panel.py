@@ -361,10 +361,11 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _body(self) -> dict:
+        n = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(n)
         if self.headers.get_content_type() != "application/json":
             raise ValueError("request body must be application/json")
-        n = int(self.headers.get("Content-Length") or 0)
-        body = json.loads(self.rfile.read(n) or b"{}")
+        body = json.loads(raw or b"{}")
         if not isinstance(body, dict):
             raise ValueError("request body must be a JSON object")
         return body
@@ -380,6 +381,9 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         elif url.path == "/api/state":
             self._json(state_payload())
+        elif url.path == "/api/health":
+            self._json({"app": "Picxel", "root": str(Path(__file__).resolve().parents[1]),
+                        "python": sys.executable, "pid": os.getpid()})
         elif url.path == "/file":
             q = parse_qs(url.query)
             job = load_job()
@@ -433,8 +437,8 @@ class Handler(BaseHTTPRequestHandler):
 
 def serve(port: int, open_browser: bool) -> int:
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    url = f"http://127.0.0.1:{port}/"
-    print(f"Picxel panel: {url}  (Ctrl+C to stop)")
+    url = f"http://127.0.0.1:{server.server_port}/"
+    print(f"Picxel panel: {url}  (Ctrl+C to stop)", flush=True)
     if open_browser:
         threading.Timer(0.5, lambda: webbrowser.open(url)).start()
     try:

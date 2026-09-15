@@ -80,6 +80,9 @@ class PanelFiles(unittest.TestCase):
         try:
             status, data = request("GET", "/api/state")
             self.assertEqual(status, 200)
+            health_status, health_body = request("GET", "/api/health")
+            self.assertEqual(health_status, 200)
+            self.assertEqual(json.loads(health_body)["app"], "Picxel")
             url = json.loads(data)["originals"][Path(filename).stem]
             self.assertEqual(url, "/file?" + urlencode({"root": "import", "path": filename}))
             self.assertEqual(request("GET", url), (200, (self.src / filename).read_bytes()))
