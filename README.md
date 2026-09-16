@@ -23,6 +23,16 @@ Export transparent **32×32, 64×64 or 128×128 PNGs**, with up to 16 colors per
 
 **[Watch the demo · 2:47](https://www.youtube.com/watch?v=NKvPYOulPvI)** — From reference selection to transparent PNGs: a horse, followed by a two-image batch. Includes English subtitles and narration.
 
+## From references to sprites
+
+Choose your references in the panel:
+
+![Potion, cake and apple reference images in the English panel](docs/media/references-en.png)
+
+Compare the redrawn concept with **128, 64 and 32 px** outputs, from left to right:
+
+![Potion and cake concepts alongside three pixel sizes in the English panel](docs/media/results-en.png)
+
 ## Get started
 
 You need a **Codex session with image-generation tools** and Python 3.10+. Picxel uses that session's tools and quota; it does not require a separate API key.
