@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/media/picxel-logo.png" width="128" height="128" alt="Picxel logo"></p>
+
 <h1 align="center">Picxel</h1>
 
 <p align="center"><a href="README.md">English</a> · <strong>中文</strong></p>
@@ -17,9 +19,9 @@ Picxel 面向独立游戏开发者。GPT 理解原图并组织重绘，本地算
 
 ## 演示
 
-[![Picxel 批量成品：牛排与红酒杯的 128 和 64 像素版本](docs/media/demo-preview-zh.png)](docs/media/picxel-demo.mp4?raw=true)
+[![Picxel 批量成品：牛排与红酒杯的 128 和 64 像素版本](docs/media/demo-preview-zh.png)](https://www.youtube.com/watch?v=NKvPYOulPvI)
 
-**[观看演示 · 2 分 47 秒](docs/media/picxel-demo.mp4?raw=true)** — 从选图到导出透明 PNG：先制作马的素材，再批量生成两张道具。视频配有英文字幕与旁白。
+**[观看演示 · 2 分 47 秒](https://www.youtube.com/watch?v=NKvPYOulPvI)** — 从选图到导出透明 PNG：先制作马的素材，再批量生成两张道具。视频配有英文字幕与旁白。
 
 ## 如何开始
 

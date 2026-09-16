@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/media/picxel-logo.png" width="128" height="128" alt="Picxel logo"></p>
+
 <h1 align="center">Picxel</h1>
 
 <p align="center"><strong>English</strong> · <a href="README.zh.md">中文</a></p>
@@ -17,9 +19,9 @@ Export transparent **32×32, 64×64 or 128×128 PNGs**, with up to 16 colors per
 
 ## Demo
 
-[![Picxel batch results: steak and wine glass at 128 and 64 pixels](docs/media/demo-preview-en.png)](docs/media/picxel-demo.mp4?raw=true)
+[![Picxel batch results: steak and wine glass at 128 and 64 pixels](docs/media/demo-preview-en.png)](https://www.youtube.com/watch?v=NKvPYOulPvI)
 
-**[Watch the demo · 2:47](docs/media/picxel-demo.mp4?raw=true)** — From reference selection to transparent PNGs: a horse, followed by a two-image batch. Includes English subtitles and narration.
+**[Watch the demo · 2:47](https://www.youtube.com/watch?v=NKvPYOulPvI)** — From reference selection to transparent PNGs: a horse, followed by a two-image batch. Includes English subtitles and narration.
 
 ## Get started
 
