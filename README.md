@@ -17,9 +17,9 @@ Export transparent **32×32, 64×64 or 128×128 PNGs**, with up to 16 colors per
 
 ## Demo
 
-> Video coming soon: one complete journey from reference images to finished sprites.
+[![Picxel batch results: steak and wine glass at 128 and 64 pixels](docs/media/demo-preview-en.png)](docs/media/picxel-demo.mp4?raw=true)
 
-<!-- Add the recorded demo here. The reveal animation is not the model's internal stroke history. -->
+**[Watch the demo · 2:47](docs/media/picxel-demo.mp4?raw=true)** — From reference selection to transparent PNGs: a horse, followed by a two-image batch. Includes English subtitles and narration.
 
 ## Get started
 

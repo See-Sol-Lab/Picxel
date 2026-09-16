@@ -17,9 +17,9 @@ Picxel 面向独立游戏开发者。GPT 理解原图并组织重绘，本地算
 
 ## 演示
 
-> 演示视频准备中：从选图到导出，展示一次完整制作流程。
+[![Picxel 批量成品：牛排与红酒杯的 128 和 64 像素版本](docs/media/demo-preview-zh.png)](docs/media/picxel-demo.mp4?raw=true)
 
-<!-- 在此放入实际录制的视频；色块演示不代表模型内部落笔顺序。 -->
+**[观看演示 · 2 分 47 秒](docs/media/picxel-demo.mp4?raw=true)** — 从选图到导出透明 PNG：先制作马的素材，再批量生成两张道具。视频配有英文字幕与旁白。
 
 ## 如何开始
 
