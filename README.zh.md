@@ -33,6 +33,12 @@ Picxel 面向独立游戏开发者。GPT 理解原图并组织重绘，本地算
 
 ![中文面板中的药瓶与蛋糕效果图及三个尺寸的像素成品](docs/media/results-zh.png)
 
+![蛋糕与苹果的效果图及 128、64、32 像素成品](docs/media/cake-apple-sizes.png)
+
+可以在外部浏览器打开本地面板，也可以让 Codex 启动面板并直接在应用内展示，一边对话，一边查看进度与成品：
+
+![Codex 对话与 Picxel 面板并排展示](docs/media/codex-panel.png)
+
 ## 如何开始
 
 需要 **能调用生图工具的 Codex 会话**和 Python 3.10+。Picxel 使用当前会话的能力与额度，不额外要求 API key。

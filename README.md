@@ -33,6 +33,12 @@ Compare the redrawn concept with **128, 64 and 32 px** outputs, from left to rig
 
 ![Potion and cake concepts alongside three pixel sizes in the English panel](docs/media/results-en.png)
 
+![Cake and apple concepts alongside 128, 64 and 32 px sprites](docs/media/cake-apple-sizes.png)
+
+Open the local panel in your own browser, or ask Codex to start it and show it inside the Codex app. Follow progress and inspect results beside the conversation:
+
+![Codex conversation and the Picxel panel side by side](docs/media/codex-panel.png)
+
 ## Get started
 
 You need a **Codex session with image-generation tools** and Python 3.10+. Picxel uses that session's tools and quota; it does not require a separate API key.
