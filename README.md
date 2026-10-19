@@ -9,9 +9,10 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue?style=flat-square" alt="GPL-3.0-only"></a>
   <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/Pixel-32%20%7C%2064%20%7C%20128-8b5cf6?style=flat-square" alt="32 / 64 / 128 pixels">
+  <a href="https://doi.org/10.5281/zenodo.23481811"><img src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.23481811-4a6fa5?style=flat-square" alt="DOI 10.5281/zenodo.23481811"></a>
 </p>
 
-<!-- Hero image and DOI badge will be added when ready. -->
+<!-- Hero image will be added when ready. -->
 
 Picxel helps indie game developers redraw references as recognizable game assets. GPT interprets the subject and directs the redraw; local algorithms turn the result into a precise pixel grid. Developed and tested primarily with GPT-6 Astra in Codex.
 

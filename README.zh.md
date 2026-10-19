@@ -9,9 +9,10 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue?style=flat-square" alt="GPL-3.0-only"></a>
   <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/Pixel-32%20%7C%2064%20%7C%20128-8b5cf6?style=flat-square" alt="32 / 64 / 128 pixels">
+  <a href="https://doi.org/10.5281/zenodo.23481811"><img src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.23481811-4a6fa5?style=flat-square" alt="DOI 10.5281/zenodo.23481811"></a>
 </p>
 
-<!-- Hero image and DOI badge will be added when ready. -->
+<!-- Hero image will be added when ready. -->
 
 Picxel 面向独立游戏开发者。GPT 理解原图并组织重绘，本地算法再取色、整理成严格的像素网格，让素材在简化后仍然神似。主要使用 Codex 中的 GPT-6 Astra 开发与实测。
 

@@ -18,6 +18,7 @@ authors:
 type: software
 version: "1.0.0"
 date-released: "2026-10-20"
+doi: "10.5281/zenodo.23481811"
 license: "GPL-3.0-only"
 repository-code: "https://github.com/See-Sol-Lab/Picxel"
 url: "https://github.com/See-Sol-Lab/Picxel"
