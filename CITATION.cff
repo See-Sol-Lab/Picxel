@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata below."
+title: "Picxel"
+abstract: >-
+  Turn reference images into pixel-art game assets for indie game developers.
+  GPT interprets the subject and directs the redraw; local algorithms turn the
+  result into a precise pixel grid and export transparent 32, 64 or 128 pixel
+  PNGs with up to 16 colors, through a bilingual local panel. Created at See
+  Sol Lab through collaboration between Goumang, Sol and Fibo
+  (Goumang × Sol × Fibo).
+authors:
+  - family-names: "Zhao"
+    given-names: "Lilith"
+    alias: "Goumang"
+    orcid: "https://orcid.org/0009-0004-3343-6270"
+    affiliation: "See Sol Lab"
+  - name: "See Sol Lab"
+type: software
+version: "1.0.0"
+date-released: "2026-10-20"
+license: "GPL-3.0-only"
+repository-code: "https://github.com/See-Sol-Lab/Picxel"
+url: "https://github.com/See-Sol-Lab/Picxel"
+keywords:
+  - pixel art
+  - game assets
+  - sprites
+  - indie game development
+  - image generation
+  - AI agents
+  - agent skill
